@@ -1,0 +1,35 @@
+zahir ~/IA1 via 🐍 v3.11.8 via ❄️  impure (ai1-python-env-env) ❤ direnv reload
+direnv: loading ~/IA1/.envrc
+direnv: using nix shell.nix
+direnv: nix-direnv: cache invalidated: files newer than cache:
+nix-direnv: /home/zahir/IA1/.envrc
+error:
+       … while calling the 'derivationStrict' builtin
+         at «nix-internal»/derivation-internal.nix:37:12:
+           36|
+           37|   strict = derivationStrict drvAttrs;
+             |            ^
+           38|
+
+       … while evaluating derivation 'ai1-python-env'
+         whose name attribute is located at /nix/store/w8w3fia26p35xays42lixahnzigsl8dv-source/pkgs/stdenv/generic/make-derivation.nix:651:11
+
+       … while evaluating attribute 'nativeBuildInputs' of derivation 'ai1-python-env'
+         at /nix/store/w8w3fia26p35xays42lixahnzigsl8dv-source/pkgs/stdenv/generic/make-derivation.nix:719:11:
+          718|           depsBuildBuild = buildBuildOutputs;
+          719|           nativeBuildInputs = buildHostOutputs;
+             |           ^
+          720|           depsBuildTarget = buildTargetOutputs;
+
+       … while calculating requiredPythonModules for python3.11-ipykernel-7.1.0:
+
+       … while calculating requiredPythonModules for python3.11-ipython-9.9.0:
+
+       … while calculating requiredPythonModules for python3.11-stack-data-0.6.3:
+
+       (stack trace truncated; use '--show-trace' to show the full, detailed trace)
+
+       error: sphinx-9.1.0 not supported for interpreter python3.11
+direnv: nix-direnv: Evaluating current nix shell failed. Falling back to previous environment!
+Python 3.11.8
+direnv: export +AR +AS +CC +CONFIG_SHELL +CXX +HOST_PATH +IN_NIX_SHELL +LD +NIX_BINTOOLS +NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu +NIX_BUILD_CORES +NIX_CC +NIX_CC_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu +NIX_CFLAGS_COMPILE +NIX_DIRENV_DID_FALLBACK +NIX_ENFORCE_NO_NATIVE +NIX_HARDENING_ENABLE +NIX_LDFLAGS +NIX_STORE +NM +OBJCOPY +OBJDUMP +RANLIB +READELF +SIZE +SOURCE_DATE_EPOCH +STRINGS +STRIP +__structuredAttrs +buildInputs +buildPhase +builder +cmakeFlags +configureFlags +depsBuildBuild +depsBuildBuildPropagated +depsBuildTarget +depsBuildTargetPropagated +depsHostHost +depsHostHostPropagated +depsTargetTarget +depsTargetTargetPropagated +doCheck +doInstallCheck +dontAddDisableDepTrack +mesonFlags +name +nativeBuildInputs +out +outputs +patches +phases +preferLocalBuild +propagatedBuildInputs +propagatedNativeBuildInputs +shell +shellHook +stdenv +strictDeps +system ~PATH ~XDG_DATA_DIRS
