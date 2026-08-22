@@ -1,24 +1,57 @@
 [tool.uv]
 python-preference = "only-system"
 
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-gpu"
+explicit = true
+
 [project]
 name = "ai1"
 version = "0.1.0"
 description = "IA1 / ML notebooks (Python 3.11)"
 requires-python = ">=3.11,<3.12"
 dependencies = [
+  # Core
   "numpy",
   "pandas",
+  "scipy",
   "scikit-learn",
+  "joblib",
+  "tqdm",
+  "h5py",
+  # Visualization
   "matplotlib",
   "seaborn",
-  "scipy",
+  "plotly",
+  "altair",
+  # Jupyter
   "jupyterlab",
   "ipykernel",
   "nbformat",
   "nbclient",
   "nbconvert",
   "jupytext",
+  # PyTorch (CUDA 12.4)
+  "torch",
+  "torchvision",
+  "torchaudio",
+  # Hugging Face
+  "transformers",
+  "datasets",
+  "tokenizers",
+  "accelerate",
+  # Gradient Boosting
+  "xgboost",
+  "lightgbm",
+  # NLP
+  "nltk",
+  "spacy",
+  # Computer Vision
+  "opencv-python-headless",
+  # Experiment Tracking
+  "tensorboard",
+  # Extras
   "pynvim",
   "pyperclip",
 ]

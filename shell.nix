@@ -7,8 +7,8 @@ in
 pkgs.mkShell {
   name = "ai1";
   buildInputs = with pkgs; [ python311 ];
-  LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+  LD_LIBRARY_PATH = "/run/opengl-driver/lib:${pkgs.lib.makeLibraryPath [
     pkgs.stdenv.cc.cc.lib
     pkgs.zlib
-  ];
+  ]}";
 }
