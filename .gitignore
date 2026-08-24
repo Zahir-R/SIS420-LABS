@@ -1,0 +1,8 @@
+# Large datasets
+LAB5/dataset/
+*.parquet
+*.zip
+*.mp4
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
