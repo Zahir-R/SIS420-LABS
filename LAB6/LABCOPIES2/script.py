@@ -146,7 +146,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 # ## 6. Entrenamiento
 
 # %%
-num_epochs = 40
+num_epochs = 100
 log_each = 5
 J_history = []
 

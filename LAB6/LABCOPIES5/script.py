@@ -173,11 +173,6 @@ def evaluar(loader, model, nombre):
 y_true_train, y_pred_train = evaluar(train_loader, model, "Entrenamiento")
 y_true_test, y_pred_test = evaluar(test_loader, model, "Prueba")
 
-# %%
-print("\nMatriz de confusión (prueba, primeras 10 clases):")
-cm = confusion_matrix(y_true_test, y_pred_test, labels=list(range(10)))
-print(cm)
-
 # %% [markdown]
 # ## 8. Guardar los pesos del modelo
 
@@ -199,10 +194,12 @@ model_loaded.load_state_dict(torch.load(PATH))
 model_loaded.eval()
 
 # Predicción de las primeras 5 muestras de prueba
-x_sample = torch.from_numpy(X_test[:5]).to(device)
+x_sample = torch.from_numpy(X_test[:50]).to(device)
 with torch.no_grad():
     preds = torch.argmax(model_loaded(x_sample), axis=1).cpu().numpy()
 
 print("Predicciones sobre las primeras 5 muestras de prueba:")
-for i in range(5):
+for i in range(50):
     print(f"  Real: {y_test[i]} | Predicho: {preds[i]}")
+
+# %%

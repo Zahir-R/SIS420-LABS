@@ -181,14 +181,6 @@ def evaluar(loader, model, nombre):
 y_true_train, y_pred_train = evaluar(train_loader, model, "Entrenamiento")
 y_true_test, y_pred_test = evaluar(test_loader, model, "Prueba")
 
-# %%
-print("\nMatriz de confusión (prueba):")
-cm = confusion_matrix(y_true_test, y_pred_test)
-print(cm)
-
-print("\nReporte de clasificación (prueba):")
-print(classification_report(y_true_test, y_pred_test, target_names=['Benigna (0)', 'Malware (1)']))
-
 # %% [markdown]
 # ## 9. Guardar los pesos del modelo
 

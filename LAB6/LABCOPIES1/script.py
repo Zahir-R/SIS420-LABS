@@ -24,7 +24,6 @@
 # - **generación de métricas** (MSE, RMSE, MAE y $R^2$) sobre la partición 80/20.
 
 # %%
-# Importaciones
 import numpy as np
 import torch
 import torch.nn as nn
@@ -148,6 +147,7 @@ model = RedRegresion().to(device)
 # %%
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
+print(criterion, optimizer)
 
 # %% [markdown]
 # ## 6. Entrenamiento
@@ -270,3 +270,5 @@ with torch.no_grad():
     pred = (model_loaded(x_in) * sigma_y + mu_y).item()
 
 print(f"Dannio inferido: {pred:.2f}")
+
+# %%
