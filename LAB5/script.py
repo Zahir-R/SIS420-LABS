@@ -41,6 +41,9 @@ import matplotlib.pyplot as pyplot
 from PIL import Image
 from sklearn.model_selection import train_test_split
 
+import torch
+print(torch.cuda.is_available())
+
 # %matplotlib inline
 pyplot.rcParams['figure.dpi'] = 110
 
@@ -59,6 +62,8 @@ pyplot.rcParams['figure.dpi'] = 110
 # reservado del propio dataset** y nunca visto durante el entrenamiento.
 
 # %%
+
+device = torch.device('cuda')
 df = pd.read_parquet('./dataset/train.parquet')
 
 print('Dimensiones (m filas):', df.shape)
