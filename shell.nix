@@ -7,8 +7,20 @@ in
 pkgs.mkShell {
   name = "ai1";
   buildInputs = with pkgs; [ python311 ];
-  LD_LIBRARY_PATH = "/run/opengl-driver/lib:${pkgs.lib.makeLibraryPath [
-    pkgs.stdenv.cc.cc.lib
-    pkgs.zlib
-  ]}";
+  LD_LIBRARY_PATH = "/run/opengl-driver/lib:${
+    pkgs.lib.makeLibraryPath [
+      pkgs.stdenv.cc.cc.lib
+      pkgs.zlib
+      pkgs.libx11
+      pkgs.libxext
+      pkgs.libxrandr
+      pkgs.libxcursor
+      pkgs.libxi
+      pkgs.libxfixes
+      pkgs.libxrender
+      pkgs.libxinerama
+      pkgs.libxv
+    ]
+  }";
+  shellHook = "export SDL_VIDEODRIVER=x11";
 }

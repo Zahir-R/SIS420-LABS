@@ -25,7 +25,7 @@ IN_NIX_SHELL='impure'
 export IN_NIX_SHELL
 LD='ld'
 export LD
-LD_LIBRARY_PATH='/run/opengl-driver/lib:/nix/store/hngmi01i8wgi25a0byrxcn4ysz5j79mw-gcc-15.2.0-lib/lib:/nix/store/dbz6pb9g67kpgpl95k8d85kzpxm1c32p-zlib-1.3.2/lib'
+LD_LIBRARY_PATH='/run/opengl-driver/lib:/nix/store/hngmi01i8wgi25a0byrxcn4ysz5j79mw-gcc-15.2.0-lib/lib:/nix/store/dbz6pb9g67kpgpl95k8d85kzpxm1c32p-zlib-1.3.2/lib:/nix/store/flhvh2a7c578zbca9arvn4n2vc2pcgpc-libx11-1.8.13/lib:/nix/store/b0dnb18ak3qwrkml30b5a9xcgk1vsb92-libxext-1.3.7/lib:/nix/store/j9f5ly9l31afxxv1r56gqnf15k1cj8lq-libxrandr-1.5.5/lib:/nix/store/gf2x0w6knrqsdvz9bs5646qgd9xbh6g8-libxcursor-1.2.3/lib:/nix/store/g3bm7755sljx222d35mc8mhw38gc2p4m-libxi-1.8.2/lib:/nix/store/8mkji51dkg6cmcx79kbj91r54vsc0pdb-libxfixes-6.0.2/lib:/nix/store/j5w94awx63f17csdk9zz0b22mq5ddp7l-libxrender-0.9.12/lib:/nix/store/ahbvjmacrbdm99lp30rvzdszxx917h5y-libxinerama-1.1.6/lib:/nix/store/6nwfg81szcvq01p44k8cryx9k81kmn18-libxv-1.0.13/lib'
 export LD_LIBRARY_PATH
 LINENO='79'
 MACHTYPE='x86_64-pc-linux-gnu'
@@ -39,7 +39,7 @@ NIX_CC='/nix/store/xcnqqnhw9hb4j5rjgds2yjryi8qki5f3-gcc-wrapper-15.2.0'
 export NIX_CC
 NIX_CC_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu='1'
 export NIX_CC_WRAPPER_TARGET_HOST_x86_64_unknown_linux_gnu
-NIX_CFLAGS_COMPILE=' -frandom-seed=l66hhsn9y5 -isystem /nix/store/2m2lgnmm5m63i5c9hr9najkpmi7af4jc-python3-3.11.15/include -isystem /nix/store/2m2lgnmm5m63i5c9hr9najkpmi7af4jc-python3-3.11.15/include'
+NIX_CFLAGS_COMPILE=' -frandom-seed=fl3kdq6li5 -isystem /nix/store/2m2lgnmm5m63i5c9hr9najkpmi7af4jc-python3-3.11.15/include -isystem /nix/store/2m2lgnmm5m63i5c9hr9najkpmi7af4jc-python3-3.11.15/include'
 export NIX_CFLAGS_COMPILE
 NIX_ENFORCE_NO_NATIVE='1'
 export NIX_ENFORCE_NO_NATIVE
@@ -189,7 +189,7 @@ export propagatedNativeBuildInputs
 declare -a propagatedTargetDepFiles=('propagated-target-target-deps' )
 shell='/nix/store/zh1ijdhb6gng1509b1zrilb6xlzx60j6-bash-5.3p9/bin/bash'
 export shell
-shellHook=''
+shellHook='export SDL_VIDEODRIVER=x11'
 export shellHook
 stdenv='/nix/store/xknwpg5yjxxsffmwdmpys269543wpdy5-stdenv-linux'
 export stdenv

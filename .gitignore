@@ -6,3 +6,9 @@ LAB5/dataset/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+# Práctica: datasets descargados y checkpoints
+PRACTICA/data/
+PRACTICA/*.pt
+.env
+__py_chache__/
