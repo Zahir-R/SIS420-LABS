@@ -1,12 +1,6 @@
 # %% [markdown]
 # # NEOWS
 # Trata de predecir si el asteroide es peligroso
-#
-# Dos modelos:
-# - **legacy**  : solo 5 características (tamaño, velocidad, distancia de paso). Infiere de verdad.
-# - **current** : 35 características (incluye orbital_data: moid, órbita, ...). Casi determinístico.
-#
-# Mismo split, mismo seed, mismo muestreo, mismo early stopping: comparación justa de métricas.
 
 # %%
 import json, os, math
@@ -47,7 +41,6 @@ print("filas con orbital_data ausente (NaN en semi_major_axis):",
       int(df["semi_major_axis"].isna().sum()))
 
 # %%
-# --- ingeniería de características ---
 df["diam_mean"] = (df["diam_min_m"] + df["diam_max_m"]) / 2
 df["diam_range"] = df["diam_max_m"] - df["diam_min_m"]
 df["diam_ratio"] = df["diam_max_m"] / (df["diam_min_m"] + 1e-8)
@@ -71,7 +64,6 @@ orbit_cols = list(orbit_dummies.columns)
 df = pd.concat([df, orbit_dummies], axis=1)
 
 # %%
-# --- current: 35 características (con orbital_data) ---
 log_features = ["diam_min_m", "diam_max_m", "diam_mean", "diam_range",
                 "vel_km_h", "miss_km", "energy_proxy",
                 "semi_major_axis", "orbital_period", "perihelion_distance",
@@ -83,8 +75,8 @@ raw_features = ["magnitude", "eccentricity", "inclination", "tisserand_inv",
                 "peri_arg_sin", "peri_arg_cos",
                 "mean_anom_sin", "mean_anom_cos"]
 features = log_features + raw_features + orbit_cols
-print(f"total features current: {len(features)}  ({len(log_features)} log1p, "
-      f"{len(raw_features)} crudas, {len(orbit_cols)} one-hot)")
+print(f"current: {len(features)}  ({len(log_features)} log, "
+      f"{len(raw_features)} raw, {len(orbit_cols)} dummy)")
 
 df2 = df[features].copy()
 for c in log_features:
@@ -94,9 +86,8 @@ y = df["hazardous"].values.astype(np.float32)
 print("x current", df2.shape, "y", y.shape)
 
 # %%
-# --- legacy: 5 características (sin orbital_data), mismas columnas que el juego ---
 legacy_features = ["magnitude", "diam_min_m", "diam_max_m", "vel_km_h", "miss_km"]
-legacy_log_features = legacy_features[1:]  # el juego hace log1p en todas menos la 1ª
+legacy_log_features = legacy_features[1:]
 
 X2_legacy = df[legacy_features].copy()
 for c in legacy_log_features:
@@ -148,7 +139,7 @@ def train_hazard(X2, y, d_in, legacy):
             else:
                 wait += 1
                 if wait == patience:
-                    print(f"early stop en epoch {epoch}, val loss {best_loss:.4f}")
+                    print(f"ES {epoch}, {best_loss:.4f}")
                     break
 
     if best_state is not None:
@@ -163,7 +154,6 @@ def train_hazard(X2, y, d_in, legacy):
 results = {}
 results["legacy"]  = train_hazard(X2_legacy, y, X2_legacy.shape[1], legacy=True)
 results["current"] = train_hazard(df2, y, df2.shape[1], legacy=False)
-print("entrenados: legacy y current")
 
 # %%
 rows = []
@@ -172,9 +162,7 @@ for name, r in results.items():
     tn, fp, fn, tp = confusion_matrix(yv, yp).ravel()
     rows.append({
         "modelo": name,
-        "n features": 5 if name == "legacy" else 35,
-        "val": len(yv),
-        "baseline(todo 0)": round(1 - yv.mean(), 4),
+        "n": 5 if name == "legacy" else 35,
         "accuracy": round(accuracy_score(yv, yp), 4),
         "AUC": round(roc_auc_score(yv, p), 4),
         "precision": round(precision_score(yv, yp), 4),
@@ -191,40 +179,31 @@ try:
 except NameError:
     pass
 
-fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+fig, axes = plt.subplots(2, 2, figsize=(16, 9))
 
 for row, (name, r) in enumerate(results.items()):
     yv, p, yp = r["yval"], r["p"], r["y_pred"]
 
     cm = confusion_matrix(yv, yp)
     ax = axes[row, 0]
-    im = ax.imshow(cm, cmap="Blues")
+    im = ax.imshow(cm, cmap="Grays")
     ax.set_xticks([0, 1]); ax.set_yticks([0, 1])
     ax.set_xticklabels(["pred 0", "pred 1"])
     ax.set_yticklabels(["real 0", "real 1"])
     for i in range(2):
         for j in range(2):
             ax.text(j, i, cm[i, j], ha="center", va="center",
-                    fontsize=14, color="black")
-    ax.set_title(f"{name}: Matriz de confusión")
-    fig.colorbar(im, ax=ax)
+                    fontsize=14, color="gray")
+    ax.set_title(name)
 
     fpr, tpr, _ = roc_curve(yv, p)
     ax = axes[row, 1]
     ax.plot(fpr, tpr, lw=2, label=f"AUC = {auc(fpr, tpr):.3f}")
-    ax.plot([0, 1], [0, 1], "k--", alpha=0.5, label="azar (0.5)")
-    ax.set_xlabel("FPR (reales 0 -> pred 1)")
-    ax.set_ylabel("TPR (reales 1 -> pred 1)")
-    ax.set_title(f"{name}: Curva ROC")
+    ax.plot([0, 1], [0, 1], "k--", alpha=0.5, label="azar")
+    ax.set_xlabel("FPR")
+    ax.set_ylabel("TPR")
+    ax.set_title(name)
     ax.grid(alpha=0.3); ax.legend()
-
-    ax = axes[row, 2]
-    ax.hist(p[yv == 0], bins=30, alpha=0.6, label="reales 0", color="grey")
-    ax.hist(p[yv == 1], bins=30, alpha=0.6, label="reales 1", color="red")
-    ax.axvline(0.5, color="k", ls="--", lw=1)
-    ax.set_xlabel("P(hazardous)")
-    ax.set_title(f"{name}: P por clase real")
-    ax.legend()
 
 plt.tight_layout()
 plt.show()
@@ -233,14 +212,6 @@ for name, r in results.items():
     tab = pd.DataFrame({"real": r["yval"], "P(haz)": r["p"].round(3), "pred": r["y_pred"]})
     print(f"\n{name}: Muestra real vs predicho")
     print(tab.sample(10, random_state=0).to_string(index=False))
-
-# %%
-# regla NASA: la etiqueta SI está definida (casi) por MOID y magnitud
-nasa_rule = (df["moid_au"] <= 0.05) & (df["magnitude"] <= 22.0)
-print("acuerdo regla NASA (moid<=0.05 & H<=22) vs etiqueta real: %.1f%%"
-      % (100 * (nasa_rule == df["hazardous"]).mean()))
-print("=> 'current' casi 100%% porque sus features (moid_au, magnitude) definen la etiqueta.")
-print("=> 'legacy' (sin orbital_data) sí tiene que inferir: mucho FP a umbral 0.5 (precision baja).")
 
 # %%
 r = results["current"]
@@ -279,3 +250,5 @@ np.savez_compressed("game_data.npz",
                 (df["miss_km"] <= 0.05 * AU)).values.astype(np.int8),
     label    = df["hazardous"].values.astype(np.int8))
 print("game_data.npz generado:", len(df), "asteroides")
+
+# %%

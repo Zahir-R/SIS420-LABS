@@ -3,8 +3,7 @@ import numpy as np
 import pygame
 import json, os, math
 
-# legacy n = 5, current = 35
-MODEL = "current"
+MODEL = "legacy"
 
 _R = np.load(os.path.join(os.path.dirname(__file__), "game_data.npz"))
 _SP = json.load(open(os.path.join(os.path.dirname(__file__), "stats_full.json")))

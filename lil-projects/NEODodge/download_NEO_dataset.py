@@ -1,8 +1,10 @@
+# %%
 import csv
 import os, socket, time
 import pandas as pd, requests
 from dotenv import load_dotenv
 
+# %%
 def safe_float(val, default=float("nan")):
     if val is None:
         return default
@@ -11,14 +13,17 @@ def safe_float(val, default=float("nan")):
     except (TypeError, ValueError):
         return default
 
+# %%
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(curr_dir, ".env"))
 API_KEY = os.getenv("NASA_API_KEY") or input("NASA API KEY: ")
 
+# %%
 base = "https://api.nasa.gov/neo/rest/v1/neo/browse"
 csv_path = os.path.join(curr_dir, "neo.csv")
 progress_path = os.path.join(curr_dir, ".progress")
 
+# %%
 cols = ["name", "neo_reference_id", "magnitude", "diam_min_m", "diam_max_m",
         "hazardous", "is_sentry", "date", "date_full", "epoch_date",
         "vel_km_h", "vel_km_s", "miss_km", "miss_au", "miss_lunar", "orbiting",
@@ -27,7 +32,7 @@ cols = ["name", "neo_reference_id", "magnitude", "diam_min_m", "diam_max_m",
         "aphelion_distance", "mean_anomaly", "mean_motion",
         "perihelion_argument", "tisserand_inv", "moid_au",
         "orbit_uncertainty", "obs_used", "data_arc_days", "orbit_class_type"]
-MAX_PAGES = 600
+MAX_PAGES = 1200
 size = 20
 retries = 5
 backoff = [2, 4, 8, 16]
@@ -35,10 +40,12 @@ timeout = 10
 chunk = 50
 
 
+# %%
 class InvalidKeyError(Exception):
     pass
 
 
+# %%
 def load_progress():
     if os.path.exists(progress_path):
         with open(progress_path) as f:
@@ -46,11 +53,13 @@ def load_progress():
     return None
 
 
+# %%
 def save_progress(page):
     with open(progress_path, "w") as f:
         f.write(str(page))
 
 
+# %%
 orbital_src = {"tisserand_inv": "jupiter_tisserand_invariant",
                "moid_au": "minimum_orbit_intersection",
                "obs_used": "observations_used",
@@ -59,6 +68,7 @@ orbital_src = {"tisserand_inv": "jupiter_tisserand_invariant",
                "orbit_class_type": ("orbit_class", "orbit_class_type")}
 
 
+# %%
 def rows_from_neo(neo):
     meters = (neo.get("estimated_diameter") or {}).get("meters") or {}
     od = neo.get("orbital_data") or {}
@@ -102,6 +112,7 @@ def rows_from_neo(neo):
     return rows
 
 
+# %%
 def fetch_page(session, page):
     params = {"page": page, "size": size, "api_key": API_KEY}
     for attempt in range(1, retries + 1):
@@ -125,6 +136,7 @@ def fetch_page(session, page):
     return False
 
 
+# %%
 def remaining_quota(resp):
     try:
         return int(resp.headers.get("X-RateLimit-Remaining", ""))
@@ -132,10 +144,12 @@ def remaining_quota(resp):
         return None
 
 
+# %%
 def frame(rows):
     return pd.DataFrame(rows).reindex(columns=cols)
 
 
+# %%
 def main():
     progress = load_progress()
     fresh = progress is None or not os.path.exists(csv_path)
@@ -201,5 +215,6 @@ def main():
     print(f"OK: {df.shape[0]} filas y {df.shape[1]} columnas en neo.csv")
 
 
+# %%
 if __name__ == "__main__":
     main()

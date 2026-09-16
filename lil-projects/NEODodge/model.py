@@ -1,9 +1,15 @@
+# %%
 import json, os, torch
 import torch.nn as nn
 
-DIR = os.path.dirname(os.path.abspath(__file__))
+# %%
+try:
+    DIR = os.path.dirname(os.path.abspath(__file__)) 
+except NameError:
+    DIR = os.getcwd()
 
 
+# %%
 class HazardNet(nn.Module):
     def __init__(self, d_in=5):
         super().__init__()
@@ -39,6 +45,7 @@ class HazardNet(nn.Module):
         return self.net(x)
 
 
+# %%
 class HazardModel:
     def __init__(self, weights="hazard_model_full.pt", stats="stats_full.json"):
         with open(os.path.join(DIR, stats)) as f:
@@ -68,3 +75,5 @@ class HazardModel:
             x = (x - self.mu) / self.sigma
             p = self.model(x.float())
         return p.flatten()
+
+# %%
