@@ -1,0 +1,9 @@
+{
+  "best_n_mfcc": 40,
+  "best_C": 0.1,
+  "best_self_threshold": 0.5,
+  "best_lote": 500,
+  "best_estrategia": "margin",
+  "techo": 0.5830077237619264,
+  "acc_activa": 0.3494775102226261
+}
