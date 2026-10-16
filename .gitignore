@@ -12,3 +12,5 @@ PRACTICA/data/
 PRACTICA/*.pt
 .env
 __py_chache__/
+
+*.direnv
