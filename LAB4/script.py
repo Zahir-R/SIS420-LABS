@@ -261,25 +261,6 @@ def descensoGradiente(theta, X, y, alpha, num_iters):
 
 # %%
 def predict(theta, X):
-    """
-    Predecir si la etiqueta es 0 o 1 mediante regresión logística aprendida.
-    Calcula las predicciones para X usando un umbral en 0.5 (es decir, si sigmoide (theta.T * x)> = 0.5, predice 1)
-
-    Parametros
-    ----------
-    theta : array_like
-        Parametros para regresion logistica. Un vecto de la forma (n+1, ).
-
-    X : array_like
-        Datos utilizados para el calculo de las predicciones.
-        La fila es el numero de los puntos para calcular las predicciones,
-        y las columnas con el numero de caracteristicas.
-
-    Devuelve
-    -------
-    p : array_like
-        Predicciones y 0 o 1 para cada fila en X.
-    """
     m = X.shape[0]  # Numero de ejemplo de entrenamiento
 
     p = np.zeros(m)
@@ -431,23 +412,3 @@ print('Top-10 permisos por magnitud de su parámetro:')
 tabla = pd.DataFrame({'theta': coef[orden]})
 tabla['efecto'] = np.where(tabla['theta'] > 0, '+ malware', '- benigna')
 print(tabla.round(4))
-
-# %% [markdown]
-# ## 8. Conclusiones
-#
-# - El modelo de regresión logística entrenado desde cero alcanza una **accuracy cercana al 96%**
-#   sobre el 20% de prueba, muy por encima del baseline mayoritario (≈ 50%, clases balanceadas),
-#   con recall y F1 también superiores al 95%. El salto respecto al baseline demuestra que el
-#   modelo aprendió patrones reales y no simplemente la clase más frecuente.
-# - El **gráfico de costo** descendió monótonamente hasta estabilizarse, confirmando que el ritmo
-#   de aprendizaje ($\alpha = 0.3$) y las 300 iteraciones fueron adecuados: iteraciones adicionales
-#   no aportan mejoras apreciables.
-# - Los permisos con mayor peso en la decisión coinciden con el análisis de correlación inicial
-#   (`READ_PHONE_STATE`, `RECEIVE_BOOT_COMPLETED`, `INSTALL_SHORTCUT`), lo que valida la coherencia
-#   interna del modelo y coincide con hallazgos conocidos de la literatura de detección de malware.
-# - En un problema de seguridad, el **recall es crítico**: un falso negativo deja pasar malware.
-#   El modelo prioriza bien esta clase sin sacrificar demasiada precisión.
-# - Limitaciones: los duplicados exactos (~74% de las filas) reflejan apps distintas con el mismo
-#   vector de permisos, por lo que algunos patrones se repiten entre entrenamiento y prueba; esto
-#   puede inflar levemente las métricas. Además, el análisis es estático: un malware que ocultara
-#   sus permisos podría evadir este detector.
