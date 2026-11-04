@@ -56,6 +56,7 @@ dependencies = [
   "pyperclip",
   "python-dotenv>=1.2.3",
   "pygame-ce>=2.5.8",
+  "pillow-heif>=1.8.1",
 ]
 
 [dependency-groups]

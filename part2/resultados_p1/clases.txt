@@ -1,0 +1,6 @@
+agua
+basura
+muro
+roca
+terreno
+vegetacion

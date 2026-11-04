@@ -1,0 +1,138 @@
+{
+  "modo_prueba": false,
+  "imagenes_pool": 136,
+  "imagenes_test": 37,
+  "parches_pool": 8574,
+  "parches_test": 2284,
+  "caracteristicas_por_parche": 70,
+  "tam_parche": 64,
+  "k_codo": 8,
+  "k_elegido": 8,
+  "silueta_pool": 0.08696944266557693,
+  "clases": [
+    "agua",
+    "basura",
+    "muro",
+    "roca",
+    "terreno",
+    "vegetacion"
+  ],
+  "parches_test_etiquetados": 32,
+  "etiquetas_fuertes": 16,
+  "metricas": [
+    {
+      "modelo": "solo_representantes_16",
+      "exactitud": 0.5625,
+      "precision_macro": 0.35522875816993466,
+      "recall_macro": 0.4365079365079365,
+      "f1_macro": 0.3333333333333333,
+      "precision_weighted": 0.5158700980392157,
+      "recall_weighted": 0.5625,
+      "f1_weighted": 0.4979166666666667
+    },
+    {
+      "modelo": "propagacion_kmeans_k8",
+      "exactitud": 0.5625,
+      "precision_macro": 0.39015151515151514,
+      "recall_macro": 0.40873015873015867,
+      "f1_macro": 0.3733044733044733,
+      "precision_weighted": 0.45880681818181823,
+      "recall_weighted": 0.5625,
+      "f1_weighted": 0.47716450216450224
+    },
+    {
+      "modelo": "activo",
+      "exactitud": 0.5625,
+      "precision_macro": 0.35522875816993466,
+      "recall_macro": 0.4365079365079365,
+      "f1_macro": 0.3333333333333333,
+      "precision_weighted": 0.5158700980392157,
+      "recall_weighted": 0.5625,
+      "f1_weighted": 0.4979166666666667
+    },
+    {
+      "modelo": "aleatorio",
+      "exactitud": 0.5625,
+      "precision_macro": 0.35522875816993466,
+      "recall_macro": 0.4365079365079365,
+      "f1_macro": 0.3333333333333333,
+      "precision_weighted": 0.5158700980392157,
+      "recall_weighted": 0.5625,
+      "f1_weighted": 0.4979166666666667
+    }
+  ],
+  "representantes": [
+    {
+      "cluster": 0,
+      "indice": 1578,
+      "archivo": "IMG_3735.JPG",
+      "y": 2606,
+      "x": 566,
+      "n_patches": 1425,
+      "clase": "vegetacion"
+    },
+    {
+      "cluster": 1,
+      "indice": 3671,
+      "archivo": "IMG_3772.JPG",
+      "y": 2453,
+      "x": 438,
+      "n_patches": 508,
+      "clase": "basura"
+    },
+    {
+      "cluster": 2,
+      "indice": 2434,
+      "archivo": "IMG_3750.HEIC",
+      "y": 1147,
+      "x": 897,
+      "n_patches": 1439,
+      "clase": "vegetacion"
+    },
+    {
+      "cluster": 3,
+      "indice": 252,
+      "archivo": "IMG_3714.HEIC",
+      "y": 239,
+      "x": 615,
+      "n_patches": 1009,
+      "clase": "terreno"
+    },
+    {
+      "cluster": 4,
+      "indice": 875,
+      "archivo": "IMG_3724.HEIC",
+      "y": 3034,
+      "x": 1953,
+      "n_patches": 2089,
+      "clase": "vegetacion"
+    },
+    {
+      "cluster": 5,
+      "indice": 4215,
+      "archivo": "IMG_3783.HEIC",
+      "y": 654,
+      "x": 1721,
+      "n_patches": 448,
+      "clase": "vegetacion"
+    },
+    {
+      "cluster": 6,
+      "indice": 6565,
+      "archivo": "IMG_3851.HEIC",
+      "y": 3055,
+      "x": 1635,
+      "n_patches": 661,
+      "clase": "roca"
+    },
+    {
+      "cluster": 7,
+      "indice": 3009,
+      "archivo": "IMG_3761.JPG",
+      "y": 1036,
+      "x": 360,
+      "n_patches": 995,
+      "clase": "vegetacion"
+    }
+  ]
+}

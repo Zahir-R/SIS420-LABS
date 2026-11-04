@@ -14,44 +14,59 @@
 # ---
 
 # %% [markdown]
-# # Punto 1: clasificacion de parches de imagen con aprendizaje no supervisado
+# # Punto 1: clasificación de parches de imagen con aprendizaje no supervisado
 #
-# 1. Inventario, deteccion de duplicados y agrupacion por escenas.
-# 2. Separacion de escenas en un pool de entrenamiento y un conjunto de prueba.
-# 3. Extraccion de parches `64 x 64` reales en escala de grises, sin PCA.
-# 4. Agrupacion con `MiniBatchKMeans` y eleccion de `k` por codo y silueta.
-# 5. **Etiquetado interactivo de los parches representativos de cada cluster.**
-# 6. **Etiquetado interactivo del conjunto de prueba.**
-# 7. Propagacion semi-supervisada y clasificacion con regresion logistica.
-# 8. Aprendizaje activo con las muestras de menor confianza.
-# 9. Figuras, metricas y resumen final.
+# Este cuadernillo clasifica parches de `64 x 64` extraídos de las imágenes
+# originales. A diferencia de la versión anterior, los parches se mantienen en
+# **RGB** y se describen con características de **color y textura**, no con
+# píxeles crudos en escala de grises.
+#
+# Flujo:
+#
+# 1. Inventario, detección de duplicados y separación por escenas.
+# 2. Extracción de parches RGB y cálculo de características.
+# 3. `MiniBatchKMeans` con varios `k` y elección del mejor `k` por el **codo**.
+# 4. Etiquetado manual de un representante por cluster.
+# 5. Etiquetado manual de parches de prueba.
+# 6. Propagación semi-supervisada y regresión logística.
+# 7. Aprendizaje activo comparado con muestreo aleatorio.
+# 8. Figuras de distribución de clusters, PCA, métricas y matriz de confusión.
+#
+# Clases: `agua`, `basura`, `muro`, `roca`, `terreno`, `vegetacion`.
+# La etiqueta `dudoso` se usa para parches ambiguos y se excluye del entrenamiento.
 
 # %%
-from pathlib import Path
+import os
 import io
 import hashlib
 import json
 import math
+import unicodedata
 import warnings
 from datetime import datetime
+from pathlib import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageOps
-from matplotlib.ticker import FixedFormatter, FixedLocator
-from matplotlib.patches import Rectangle
+from IPython.display import display
+from matplotlib.patches import Patch, Rectangle
 from sklearn.cluster import MiniBatchKMeans
+from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
+    adjusted_rand_score,
     classification_report,
     confusion_matrix,
+    normalized_mutual_info_score,
     precision_recall_fscore_support,
-    silhouette_samples,
     silhouette_score,
 )
 from sklearn.model_selection import GroupShuffleSplit
+from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
 
@@ -63,77 +78,117 @@ try:
 except Exception:
     HEIF_DISPONIBLE = False
 
-try:
-    import ipywidgets as widgets
-    from IPython.display import clear_output, display
-
-    WIDGETS_DISPONIBLES = True
-except Exception:
-    WIDGETS_DISPONIBLES = False
-
-EXTENSIONES_IMAGEN = {".heic", ".jpg", ".jpeg", ".png"}
+MODO_PRUEBA = os.environ.get("P1_MODO_PRUEBA", "0") == "1"
 
 RAIZ = Path.cwd()
-if not (RAIZ / "punto1_contaminacion_notebook.py").exists():
-    RAIZ = Path("/home/zahir/SIS420-LABS/part2")
-
+if not (RAIZ / "maria_luciana_salinas_vilar").exists():
+    RAIZ = Path("/home/zahir/IA1/part2")
 CARPETA_IMAGENES = RAIZ / "maria_luciana_salinas_vilar"
-
-MODO_PRUEBA = False
 
 TAM_PARCHE = 64
 MAX_PARCHES_POR_IMAGEN = 64
 MIN_STD_PARCHE = 5.0
 SEMILLA = 42
 K_MIN = 2
-K_MAX = 12
+K_MAX = 20
 TEST_SIZE = 0.2
 MUESTRA_SILUETA = 2000
-FRAC_INCIERTAS = 0.2
-PARCHES_TEST_POR_CLUSTER = 12
-REPETICIONES_ACTIVO = 5
+OBJETIVO_ETIQUETAS = 86
+N_ACTIVO = 8
+REPETICIONES_ACTIVO = 2
+N_COBERTURA = 8
 GAP_ESCENA = 120
 UMBRAL_DUPLICADO = 1
-CLASES_SUGERIDAS = [
-    "terreno",
-    "roca",
-    "rama",
-    "lata",
-    "vegetacion",
-    "agua",
-    "muro",
-]
+CLASES_BASE = ["agua", "basura", "muro", "roca", "terreno", "vegetacion"]
+CLASES = list(CLASES_BASE)
 
 if MODO_PRUEBA:
-    SALIDA = Path("/tmp/opencode/resultados_punto1_v2_prueba")
-    MAX_IMAGENES = 40
-    PARCHES_POR_IMAGEN = 8
-    K_MIN = 2
-    K_MAX = 3
+    SALIDA = Path("/tmp/opencode/resultados_p1_prueba")
+    MAX_IMAGENES = 24
+    PARCHES_POR_IMAGEN = 4
+    K_MAX = 5
     MUESTRA_SILUETA = 500
-    PARCHES_TEST_POR_CLUSTER = 6
+    OBJETIVO_ETIQUETAS = 24
+    N_ACTIVO = 3
     REPETICIONES_ACTIVO = 1
+    N_COBERTURA = 0
     SIN_CACHE = True
 else:
-    SALIDA = RAIZ / "resultados_punto1_v2"
+    SALIDA = RAIZ / "resultados_p1"
     MAX_IMAGENES = None
     PARCHES_POR_IMAGEN = MAX_PARCHES_POR_IMAGEN
-    K_MIN = 2
-    K_MAX = 12
-    MUESTRA_SILUETA = 2000
-    PARCHES_TEST_POR_CLUSTER = 12
-    REPETICIONES_ACTIVO = 5
     SIN_CACHE = False
 
 FIGURAS = SALIDA / "figuras"
 CACHE = SALIDA / "cache"
 ETIQUETAS_REPRESENTANTES = SALIDA / "etiquetas_representantes.csv"
 ETIQUETAS_TEST = SALIDA / "etiquetas_test.csv"
+ETIQUETAS_COBERTURA = SALIDA / "etiquetas_cobertura.csv"
+ETIQUETAS_ACTIVO = SALIDA / "etiquetas_activo.csv"
+ETIQUETAS_ALEATORIO = SALIDA / "etiquetas_aleatorio.csv"
+RUTA_CLASES = SALIDA / "clases.txt"
+
 SALIDA.mkdir(parents=True, exist_ok=True)
 FIGURAS.mkdir(parents=True, exist_ok=True)
 CACHE.mkdir(parents=True, exist_ok=True)
 
+
+def normalizar_clase(texto):
+    texto = str(texto).strip().lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return " ".join(texto.split())
+
+
+def guardar_clases(clases, ruta):
+    ruta = Path(ruta)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    limpias = []
+    for clase in clases:
+        c = normalizar_clase(clase)
+        if c and c not in limpias:
+            limpias.append(c)
+    ruta.write_text("\n".join(limpias) + "\n", encoding="utf-8")
+    return ruta
+
+
+if RUTA_CLASES.exists():
+    for linea in RUTA_CLASES.read_text(encoding="utf-8").splitlines():
+        clase = normalizar_clase(linea)
+        if clase and clase not in CLASES:
+            CLASES.append(clase)
+
+if not MODO_PRUEBA:
+    for ruta_csv in [
+        ETIQUETAS_REPRESENTANTES,
+        ETIQUETAS_TEST,
+        ETIQUETAS_COBERTURA,
+        ETIQUETAS_ACTIVO,
+        ETIQUETAS_ALEATORIO,
+    ]:
+        if ruta_csv.exists():
+            df_clases = pd.read_csv(ruta_csv, dtype=str, keep_default_na=False)
+            if "clase" in df_clases.columns:
+                for clase in df_clases["clase"]:
+                    c = normalizar_clase(clase)
+                    if c and c != "dudoso" and c not in CLASES:
+                        CLASES.append(c)
+
+limpias = []
+for clase in CLASES:
+    c = normalizar_clase(clase)
+    if c and c not in limpias:
+        limpias.append(c)
+CLASES[:] = limpias
+guardar_clases(CLASES, RUTA_CLASES)
+
 plt.rcParams.update({"figure.dpi": 110, "axes.grid": True, "grid.alpha": 0.2})
+
+print(f"Modo de prueba: {MODO_PRUEBA}")
+print(f"Carpeta de imágenes: {CARPETA_IMAGENES}")
+print(f"Salida: {SALIDA}")
+print(f"HEIF disponible: {HEIF_DISPONIBLE}")
+print(f"Clases: {CLASES}")
 
 
 def guardar_fig(ruta):
@@ -144,31 +199,6 @@ def guardar_fig(ruta):
     return ruta
 
 
-print(f"Modo de prueba: {MODO_PRUEBA}")
-print(f"Carpeta de imagenes: {CARPETA_IMAGENES}")
-print(f"Salida: {SALIDA}")
-print(f"Parches por imagen: {PARCHES_POR_IMAGEN}")
-print(f"Tamano de parche: {TAM_PARCHE}x{TAM_PARCHE} en escala de grises")
-print(f"HEIF disponible: {HEIF_DISPONIBLE}")
-print(f"Widgets disponibles: {WIDGETS_DISPONIBLES}")
-
-# %% [markdown]
-# ## Mapa del cuadernillo
-#
-# - **Inventario:** carga las imagenes, detecta duplicados y agrupa por escena.
-# - **Pool y prueba:** separa escenas completas para evaluar sin fugas de datos.
-# - **Parches:** extrae parches reales `64 x 64` en escala de grises.
-# - **MiniBatchKMeans:** elige `k` por codo y silueta, y obtiene un representante
-#   por cluster.
-# - **Etiquetado interactivo:** etiqueta los representantes y el conjunto de prueba.
-# - **Semi-supervisado:** propaga la clase del representante a todo el cluster.
-# - **Aprendizaje activo:** entrena con las muestras de menor confianza.
-
-# %% [markdown]
-# ## 1. Funciones de inventario y carga de imagenes
-
-
-# %%
 def cargar_rgb(ruta):
     ruta = Path(ruta)
     with Image.open(ruta) as img:
@@ -176,11 +206,192 @@ def cargar_rgb(ruta):
         return img.convert("RGB")
 
 
-def cargar_escala_grises(ruta):
+def cargar_parche_rgb(archivo, y, x):
+    imagen = cargar_rgb(CARPETA_IMAGENES / archivo)
+    parche = imagen.crop((int(x), int(y), int(x) + TAM_PARCHE, int(y) + TAM_PARCHE))
+    return np.asarray(parche, dtype=np.uint8)
+
+
+def guardar_etiquetas(df, ruta):
     ruta = Path(ruta)
-    with Image.open(ruta) as img:
-        img = ImageOps.exif_transpose(img)
-        return img.convert("L")
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    columnas = [
+        c
+        for c in [
+            "cluster",
+            "indice",
+            "archivo",
+            "y",
+            "x",
+            "n_patches",
+            "prediccion",
+            "confianza",
+            "margen",
+            "clase",
+        ]
+        if c in df.columns
+    ]
+    df[columnas].to_csv(ruta, index=False, encoding="utf-8")
+    return ruta
+
+
+def cargar_etiquetas(ruta, df, clave):
+    df = df.copy().reset_index(drop=True)
+    ruta = Path(ruta)
+    if not ruta.exists():
+        return df
+    guardadas = pd.read_csv(ruta, dtype=str, keep_default_na=False)
+    guardadas.columns = [c.strip().lower() for c in guardadas.columns]
+    if clave not in guardadas.columns or "clase" not in guardadas.columns:
+        return df
+    guardadas[clave] = guardadas[clave].astype(int)
+    mapa_clase = dict(
+        zip(guardadas[clave], guardadas["clase"].astype(str).str.strip())
+    )
+    df["clase"] = (
+        df[clave].map(mapa_clase).fillna(df["clase"]).astype(str).str.strip()
+    )
+    for columna in ["indice", "archivo", "y", "x", "n_patches", "prediccion", "confianza", "margen"]:
+        if columna in guardadas.columns and columna in df.columns:
+            mapa_columna = dict(zip(guardadas[clave], guardadas[columna]))
+            df[columna] = df[clave].map(mapa_columna).fillna(df[columna])
+    for columna in ["indice", "y", "x", "n_patches"]:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce").fillna(-1).astype(int)
+    for columna in ["confianza", "margen"]:
+        if columna in df.columns:
+            df[columna] = pd.to_numeric(df[columna], errors="coerce").fillna(0.0).astype(float)
+    return df
+
+
+def mostrar_parche_contexto(archivo, y, x, titulo=""):
+    imagen = cargar_rgb(CARPETA_IMAGENES / archivo)
+    parche = imagen.crop((int(x), int(y), int(x) + TAM_PARCHE, int(y) + TAM_PARCHE))
+    contexto = imagen.copy()
+    dibujo = ImageDraw.Draw(contexto)
+    dibujo.rectangle(
+        [int(x), int(y), int(x) + TAM_PARCHE - 1, int(y) + TAM_PARCHE - 1],
+        outline="red",
+        width=6,
+    )
+    contexto.thumbnail((900, 900), Image.Resampling.LANCZOS)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    axes[0].imshow(parche)
+    axes[0].set_title("Parche 64x64")
+    axes[0].axis("off")
+    axes[1].imshow(contexto)
+    axes[1].set_title(str(archivo), fontsize=8)
+    axes[1].axis("off")
+    fig.suptitle(titulo)
+    plt.tight_layout()
+    plt.show()
+
+
+def etiquetar_lote_prompt(df, ruta_salida, clave, titulo, clases, columnas_extra=None):
+    df = cargar_etiquetas(ruta_salida, df, clave)
+    for i in range(len(df)):
+        clase_actual = str(df.at[i, "clase"]).strip()
+        if clase_actual:
+            continue
+        fila = df.iloc[i]
+        print(
+            f"\n[{i + 1}/{len(df)}] {titulo} | cluster {fila.get('cluster', '')} | "
+            f"{fila['archivo']} y={int(fila['y'])} x={int(fila['x'])}"
+        )
+        if columnas_extra:
+            for columna in columnas_extra:
+                if columna in fila.index:
+                    print(f"  {columna}: {fila[columna]}")
+        mostrar_parche_contexto(
+            fila["archivo"],
+            int(fila["y"]),
+            int(fila["x"]),
+            titulo=f"{titulo} {i + 1}/{len(df)}",
+        )
+        while True:
+            texto = normalizar_clase(
+                input(
+                    f"Clase {clases} o nueva (Enter=saltar, d=dudoso, s=salir): "
+                )
+            )
+            if texto == "s":
+                guardar_etiquetas(df, ruta_salida)
+                return df
+            if texto == "":
+                break
+            if texto in {"d", "dudoso"}:
+                df.at[i, "clase"] = "dudoso"
+                guardar_etiquetas(df, ruta_salida)
+                break
+            if texto not in clases:
+                clases.append(texto)
+                guardar_clases(clases, RUTA_CLASES)
+                print(f"Clase agregada: {texto}")
+            df.at[i, "clase"] = texto
+            guardar_etiquetas(df, ruta_salida)
+            break
+    guardar_etiquetas(df, ruta_salida)
+    return df
+
+
+def etiquetar_representantes_prompt(df_reps, candidatos, ruta_salida, clases):
+    df_reps = cargar_etiquetas(ruta_salida, df_reps, "cluster")
+    for i in range(len(df_reps)):
+        cluster = int(df_reps.at[i, "cluster"])
+        lista = candidatos.get(cluster, [])
+        if not lista:
+            continue
+        posicion = 0
+        while True:
+            candidato = lista[posicion]
+            df_reps.at[i, "indice"] = int(candidato["indice"])
+            df_reps.at[i, "archivo"] = str(candidato["archivo"])
+            df_reps.at[i, "y"] = int(candidato["y"])
+            df_reps.at[i, "x"] = int(candidato["x"])
+            clase_actual = str(df_reps.at[i, "clase"]).strip()
+            print(
+                f"\nCluster {cluster} | candidato {posicion + 1}/{len(lista)} | "
+                f"{candidato['archivo']} y={candidato['y']} x={candidato['x']} | "
+                f"clase actual: {clase_actual if clase_actual else '(sin etiquetar)'}"
+            )
+            mostrar_parche_contexto(
+                candidato["archivo"],
+                candidato["y"],
+                candidato["x"],
+                titulo=f"Cluster {cluster} | {posicion + 1}/{len(lista)}",
+            )
+            texto = normalizar_clase(
+                input(
+                    f"Clase {clases} o nueva (Enter=saltar, n=siguiente, d=dudoso, s=salir): "
+                )
+            )
+            if texto == "s":
+                guardar_etiquetas(df_reps, ruta_salida)
+                return df_reps
+            if texto == "n":
+                posicion = (posicion + 1) % len(lista)
+                continue
+            if texto == "":
+                break
+            if texto in {"d", "dudoso"}:
+                df_reps.at[i, "clase"] = "dudoso"
+                guardar_etiquetas(df_reps, ruta_salida)
+                break
+            if texto not in clases:
+                clases.append(texto)
+                guardar_clases(clases, RUTA_CLASES)
+                print(f"Clase agregada: {texto}")
+            df_reps.at[i, "clase"] = texto
+            guardar_etiquetas(df_reps, ruta_salida)
+            break
+    guardar_etiquetas(df_reps, ruta_salida)
+    return df_reps
+
+# %% [markdown]
+# ## 1. Inventario y separación por escenas
+
+# %%
+EXTENSIONES_IMAGEN = {".heic", ".jpg", ".jpeg", ".png"}
 
 
 def leer_fecha(img, ruta):
@@ -214,23 +425,19 @@ def inventariar(carpeta, umbral_duplicado=UMBRAL_DUPLICADO, gap_escena=GAP_ESCEN
         for p in carpeta.iterdir()
         if p.is_file() and p.suffix.lower() in EXTENSIONES_IMAGEN
     )
-
     registros = []
     duplicados = []
     hashes = []
     total = len(archivos)
-
     for posicion, ruta in enumerate(archivos, start=1):
         img = cargar_rgb(ruta)
         fecha = leer_fecha(img, ruta)
         huella = hash_promedio(img)
-
         duplicado_de = None
         for anterior_huella, anterior_nombre in hashes:
             if distancia_hamming(huella, anterior_huella) <= umbral_duplicado:
                 duplicado_de = anterior_nombre
                 break
-
         if duplicado_de is not None:
             duplicados.append(
                 {
@@ -249,33 +456,28 @@ def inventariar(carpeta, umbral_duplicado=UMBRAL_DUPLICADO, gap_escena=GAP_ESCEN
                     "fecha_dt": fecha,
                 }
             )
-
         if posicion % 20 == 0 or posicion == total:
             print(f"Inventario: {posicion}/{total} archivos procesados")
-
     registros.sort(key=lambda r: r["fecha_dt"])
     escena = -1
     fecha_anterior = None
     for registro in registros:
         fecha = registro["fecha_dt"]
-        if (
-            fecha_anterior is None
-            or (fecha - fecha_anterior).total_seconds() > gap_escena
-        ):
+        if fecha_anterior is None or (fecha - fecha_anterior).total_seconds() > gap_escena:
             escena += 1
         registro["escena"] = escena
         fecha_anterior = fecha
-
     df = pd.DataFrame(registros)
     df = df.drop(columns=["fecha_dt"])
     df_duplicados = pd.DataFrame(duplicados)
     return df, df_duplicados
 
 
-# %% [markdown]
-# ## 2. Inventario y separacion por escenas
+if not HEIF_DISPONIBLE:
+    raise RuntimeError(
+        "Falta pillow-heif. Instala con: uv add pillow-heif"
+    )
 
-# %%
 df_inventario, df_duplicados = inventariar(
     CARPETA_IMAGENES,
     umbral_duplicado=UMBRAL_DUPLICADO,
@@ -295,31 +497,101 @@ indices_pool, indices_test = next(divisor.split(df, groups=df["escena"]))
 df_pool = df.iloc[indices_pool].reset_index(drop=True)
 df_test = df.iloc[indices_test].reset_index(drop=True)
 
-print("Division por escenas")
-print(f"Imagenes unicas          : {len(df)}")
+print("División por escenas")
+print(f"Imágenes únicas          : {len(df)}")
 print(f"Escenas en el pool       : {df_pool['escena'].nunique()}")
 print(f"Escenas en prueba        : {df_test['escena'].nunique()}")
-print(f"Imagenes en el pool      : {len(df_pool)}")
-print(f"Imagenes en prueba       : {len(df_test)}")
+print(f"Imágenes en el pool      : {len(df_pool)}")
+print(f"Imágenes en prueba       : {len(df_test)}")
 
 # %% [markdown]
-# ## 3. Extraccion de parches en escala de grises
+# ## 2. Extracción de parches RGB y características de color y textura
 #
-# Cada imagen se divide en una grilla de regiones y de cada region se toma un
-# recorte real de `64 x 64` pixeles en escala de grises, sin redimensionar la
-# imagen completa. Asi el parche conserva el detalle original.
-
+# Cada parche de `64 x 64` se describe con histogramas HSV, momentos de color y
+# medidas de textura (Sobel, Laplaciano, desviación local, entropía y bordes).
+# La caché guarda solo las características y las coordenadas; para mostrar un
+# parche se recorta de la imagen original.
 
 # %%
-def extraer_parches_imagen(ruta, n_parches, semilla, min_std):
-    img = cargar_escala_grises(ruta)
-    arreglo = np.asarray(img, dtype=np.uint8)
-    alto, ancho = arreglo.shape
+def extraer_caracteristicas_parche(parche_rgb):
+    parche = parche_rgb.astype(np.uint8)
+    hsv = cv2.cvtColor(parche, cv2.COLOR_RGB2HSV)
+    gris = cv2.cvtColor(parche, cv2.COLOR_RGB2GRAY)
 
+    histogramas = []
+    for canal, bins, rango in zip(
+        [hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]],
+        [18, 16, 16],
+        [(0, 180), (0, 256), (0, 256)],
+    ):
+        histograma, _ = np.histogram(canal, bins=bins, range=rango)
+        histograma = histograma.astype(np.float32)
+        histograma /= max(1.0, float(histograma.sum()))
+        histogramas.append(histograma)
+    color_hist = np.concatenate(histogramas)
+
+    rgb = parche.astype(np.float32) / 255.0
+    hsv_f = hsv.astype(np.float32)
+    hsv_f[:, :, 0] /= 180.0
+    hsv_f[:, :, 1] /= 255.0
+    hsv_f[:, :, 2] /= 255.0
+
+    momentos = []
+    for canal in [
+        rgb[:, :, 0],
+        rgb[:, :, 1],
+        rgb[:, :, 2],
+        hsv_f[:, :, 0],
+        hsv_f[:, :, 1],
+        hsv_f[:, :, 2],
+    ]:
+        momentos.extend([float(canal.mean()), float(canal.std())])
+
+    gx = cv2.Sobel(gris, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gris, cv2.CV_32F, 0, 1, ksize=3)
+    magnitud = cv2.magnitude(gx, gy)
+    textura = [
+        float(magnitud.mean()),
+        float(magnitud.std()),
+        float(np.percentile(magnitud, 90)),
+    ]
+
+    laplaciano = cv2.Laplacian(gris, cv2.CV_32F)
+    textura.append(float(laplaciano.var()))
+
+    bloques = gris.reshape(8, 8, 8, 8).astype(np.float32)
+    std_bloques = bloques.std(axis=(2, 3))
+    textura.extend([float(std_bloques.mean()), float(std_bloques.std())])
+
+    hist_gris, _ = np.histogram(gris, bins=32, range=(0, 256))
+    probabilidades = hist_gris.astype(np.float32)
+    probabilidades /= max(1.0, float(probabilidades.sum()))
+    entropia = float(
+        -np.sum(probabilidades[probabilidades > 0] * np.log2(probabilidades[probabilidades > 0]))
+    )
+    textura.append(entropia)
+
+    bordes = cv2.Canny(gris, 50, 150)
+    textura.append(float(bordes.mean() / 255.0))
+
+    vector = np.concatenate(
+        [
+            color_hist,
+            np.asarray(momentos, dtype=np.float32),
+            np.asarray(textura, dtype=np.float32),
+        ]
+    )
+    return vector.astype(np.float32)
+
+
+def extraer_parches_imagen(ruta, n_parches, semilla, min_std):
+    img = cargar_rgb(ruta)
+    arreglo = np.asarray(img, dtype=np.uint8)
+    alto, ancho = arreglo.shape[:2]
     lado = int(math.ceil(math.sqrt(n_parches)))
     rng = np.random.default_rng(semilla)
 
-    parches = []
+    caracteristicas = []
     coordenadas = []
     for ry in range(lado):
         for rx in range(lado):
@@ -327,7 +599,6 @@ def extraer_parches_imagen(ruta, n_parches, semilla, min_std):
             y1 = int((ry + 1) * alto / lado)
             x0 = int(rx * ancho / lado)
             x1 = int((rx + 1) * ancho / lado)
-
             max_y = y1 - TAM_PARCHE
             max_x = x1 - TAM_PARCHE
             if max_y <= y0 or max_x <= x0:
@@ -336,15 +607,15 @@ def extraer_parches_imagen(ruta, n_parches, semilla, min_std):
             else:
                 cy = int(rng.integers(y0, max_y + 1))
                 cx = int(rng.integers(x0, max_x + 1))
-
             parche = arreglo[cy : cy + TAM_PARCHE, cx : cx + TAM_PARCHE]
-            if parche.shape != (TAM_PARCHE, TAM_PARCHE):
+            if parche.shape != (TAM_PARCHE, TAM_PARCHE, 3):
                 continue
-            if float(parche.std()) >= min_std:
-                parches.append(parche.reshape(-1).copy())
+            gris = cv2.cvtColor(parche, cv2.COLOR_RGB2GRAY)
+            if float(gris.std()) >= min_std:
+                caracteristicas.append(extraer_caracteristicas_parche(parche))
                 coordenadas.append((cy, cx))
 
-    if not parches:
+    if not caracteristicas:
         for ry in range(lado):
             for rx in range(lado):
                 y0 = int(ry * alto / lado)
@@ -352,40 +623,42 @@ def extraer_parches_imagen(ruta, n_parches, semilla, min_std):
                 x0 = int(rx * ancho / lado)
                 x1 = int((rx + 1) * ancho / lado)
                 parche = arreglo[y0 : y0 + TAM_PARCHE, x0 : x0 + TAM_PARCHE]
-                if parche.shape == (TAM_PARCHE, TAM_PARCHE):
-                    parches.append(parche.reshape(-1).copy())
+                if parche.shape == (TAM_PARCHE, TAM_PARCHE, 3):
+                    caracteristicas.append(extraer_caracteristicas_parche(parche))
                     coordenadas.append((y0, x0))
 
-    if len(parches) > n_parches:
-        elegidos = np.sort(rng.choice(len(parches), size=n_parches, replace=False))
-        parches = [parches[i] for i in elegidos]
+    if len(caracteristicas) > n_parches:
+        elegidos = np.sort(rng.choice(len(caracteristicas), size=n_parches, replace=False))
+        caracteristicas = [caracteristicas[i] for i in elegidos]
         coordenadas = [coordenadas[i] for i in elegidos]
 
-    x = np.asarray(parches, dtype=np.float32) / 255.0
-    coords = np.asarray(coordenadas, dtype=np.int32)
-    return x, coords
+    return np.vstack(caracteristicas).astype(np.float32), np.asarray(
+        coordenadas, dtype=np.int32
+    )
 
 
 def construir_matriz(df, n_parches, min_std, semilla):
     partes_x = []
     archivos = []
     partes_coords = []
-
-    for posicion, fila in df.iterrows():
+    total = len(df)
+    for posicion, fila in enumerate(df.itertuples(index=False), start=1):
         x, coords = extraer_parches_imagen(
-            fila["ruta"],
+            fila.ruta,
             n_parches=n_parches,
             semilla=semilla + posicion,
             min_std=min_std,
         )
         partes_x.append(x)
-        archivos.extend([fila["archivo"]] * len(x))
+        archivos.extend([fila.archivo] * len(x))
         partes_coords.append(coords)
-
-    x_total = np.vstack(partes_x).astype(np.float32)
-    archivos_total = np.asarray(archivos)
-    coords_total = np.vstack(partes_coords)
-    return x_total, archivos_total, coords_total
+        if posicion % 10 == 0 or posicion == total:
+            print(f"Parches: {posicion}/{total} imágenes procesadas")
+    return (
+        np.vstack(partes_x).astype(np.float32),
+        np.asarray(archivos),
+        np.vstack(partes_coords).astype(np.int32),
+    )
 
 
 def clave_cache(lista_archivos, parametros):
@@ -395,6 +668,8 @@ def clave_cache(lista_archivos, parametros):
 
 def cargar_o_construir_matriz(df, cache_dir, n_parches, min_std, semilla, usar_cache):
     parametros = {
+        "version": "color_textura_v1",
+        "modo": "rgb",
         "tam_parche": TAM_PARCHE,
         "n_parches": int(n_parches),
         "min_std": float(min_std),
@@ -403,15 +678,13 @@ def cargar_o_construir_matriz(df, cache_dir, n_parches, min_std, semilla, usar_c
     }
     ruta_cache = (
         Path(cache_dir)
-        / f"parches_{clave_cache(df['archivo'].astype(str), parametros)}.npz"
+        / f"caracteristicas_{clave_cache(df['archivo'].astype(str), parametros)}.npz"
     )
     ruta_cache.parent.mkdir(parents=True, exist_ok=True)
-
     if usar_cache and ruta_cache.exists():
         datos = np.load(ruta_cache, allow_pickle=False)
-        print(f"Cache cargado desde: {ruta_cache}")
+        print(f"Caché cargado desde: {ruta_cache}")
         return datos["X"], datos["archivos"], datos["coords"]
-
     x_total, archivos_total, coords_total = construir_matriz(
         df, n_parches=n_parches, min_std=min_std, semilla=semilla
     )
@@ -422,14 +695,10 @@ def cargar_o_construir_matriz(df, cache_dir, n_parches, min_std, semilla, usar_c
             archivos=archivos_total,
             coords=coords_total,
         )
-        print(f"Cache guardado en: {ruta_cache}")
+        print(f"Caché guardado en: {ruta_cache}")
     return x_total, archivos_total, coords_total
 
 
-# %% [markdown]
-# ## 4. Construccion de las matrices de parches
-
-# %%
 X_pool, archivos_pool, coords_pool = cargar_o_construir_matriz(
     df_pool,
     cache_dir=CACHE,
@@ -447,31 +716,31 @@ X_test, archivos_test, coords_test = cargar_o_construir_matriz(
     usar_cache=not SIN_CACHE,
 )
 
-print("Matrices de parches")
+scaler = StandardScaler()
+X_pool_esc = scaler.fit_transform(X_pool).astype(np.float32)
+X_test_esc = scaler.transform(X_test).astype(np.float32)
+
+print("Matrices de características")
 print(f"X_pool: {X_pool.shape} | X_test: {X_test.shape}")
-print(f"Caracteristicas por parche: {TAM_PARCHE * TAM_PARCHE}")
-print(
-    f"Verificacion 64x64: cada parche es {TAM_PARCHE}x{TAM_PARCHE} pixeles "
-    f"aplanados a {TAM_PARCHE * TAM_PARCHE} valores (columna por parche = "
-    f"{X_pool.shape[1]})"
-)
+print(f"Características por parche: {X_pool.shape[1]}")
+print(f"Parches del pool: {len(X_pool)} | Parches de prueba: {len(X_test)}")
 
 # %% [markdown]
-# ## 5. MiniBatchKMeans: seleccion de k
+# ## 3. Selección de `k` por el codo
 #
-# Se entrena `MiniBatchKMeans` directamente sobre los pixeles crudos en escala de
-# grises. El numero de clusters se elige con el metodo del codo (inercia) y el
-# indice de silueta.
-
+# Se evalúan todos los `k` entre `K_MIN` y `K_MAX`. El criterio principal es el
+# **codo de la inercia**; la silueta se usa como diagnóstico secundario. Luego se
+# fija un mínimo de 6 clusters, porque hay 6 clases semánticas.
 
 # %%
 def nuevo_minibatch(k, semilla, n_muestras):
     return MiniBatchKMeans(
-        n_clusters=k,
+        n_clusters=int(k),
+        init="k-means++",
         random_state=semilla,
         batch_size=int(min(2048, max(1, n_muestras))),
-        n_init=3,
-        max_iter=200,
+        n_init=10,
+        max_iter=300,
         reassignment_ratio=0.0,
     )
 
@@ -481,129 +750,118 @@ def evaluar_k(x, k_min, k_max, semilla, muestra_silueta):
     k_min = int(max(2, k_min))
     if k_max < k_min:
         raise RuntimeError("No hay suficientes muestras para evaluar K-Means")
-
     filas = []
+    modelos = {}
     for k in range(k_min, k_max + 1):
         modelo = nuevo_minibatch(k, semilla, len(x)).fit(x)
-        etiquetas = modelo.predict(x)
+        etiquetas = modelo.labels_
         tam = int(min(muestra_silueta, len(x)))
         silueta = float(
             silhouette_score(x, etiquetas, sample_size=tam, random_state=semilla)
         )
         filas.append({"k": k, "inercia": float(modelo.inertia_), "silueta": silueta})
+        modelos[k] = modelo
         print(f"k={k:2d} | inercia={modelo.inertia_:.2f} | silueta={silueta:.4f}")
-
     df = pd.DataFrame(filas)
-    mejor_k = int(df.loc[df["silueta"].idxmax(), "k"])
-    return df, mejor_k
+    return df, modelos
 
 
-def graficar_seleccion_k(df, mejor_k, ruta):
+def detectar_codo(df):
+    x = df["k"].to_numpy(dtype=float)
+    y = df["inercia"].to_numpy(dtype=float)
+    x_norm = (x - x.min()) / max(1e-12, x.max() - x.min())
+    y_norm = (y - y.min()) / max(1e-12, y.max() - y.min())
+    puntos = np.column_stack([x_norm, y_norm])
+    inicio = np.array([x_norm[0], y_norm[0]])
+    fin = np.array([x_norm[-1], y_norm[-1]])
+    vector = fin - inicio
+    norma = max(1e-12, float(np.linalg.norm(vector)))
+    distancias = np.abs(
+        vector[0] * (puntos[:, 1] - inicio[1])
+        - vector[1] * (puntos[:, 0] - inicio[0])
+    ) / norma
+    return int(x[int(np.argmax(distancias))])
+
+
+def graficar_seleccion_k(df, k_codo, k_elegido, ruta):
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-    axes[0].plot(df["k"], df["silueta"], "o-", color="#4c72b0")
-    axes[0].axvline(
-        mejor_k, color="#c44e52", linestyle="--", label=f"mejor k={mejor_k}"
-    )
-    axes[0].set_xlabel("Numero de clusters k")
-    axes[0].set_ylabel("Indice de Silueta")
-    axes[0].set_title("Silueta vs k")
+    axes[0].plot(df["k"], df["silueta"], "o-", color="#4c72b0", label="silueta")
+    max_silueta = int(df.loc[df["silueta"].idxmax(), "k"])
+    axes[0].axvline(k_codo, color="#c44e52", linestyle="--", label=f"codo k={k_codo}")
+    axes[0].axvline(k_elegido, color="#55a868", linestyle=":", label=f"k elegido={k_elegido}")
+    axes[0].set_xlabel("Número de clusters k")
+    axes[0].set_ylabel("Índice de silueta")
+    axes[0].set_title(f"Silueta vs k (máximo en k={max_silueta})")
     axes[0].legend()
-    axes[1].plot(df["k"], df["inercia"], "s-", color="#55a868")
-    axes[1].axvline(
-        mejor_k, color="#c44e52", linestyle="--", label=f"mejor k={mejor_k}"
-    )
-    axes[1].set_xlabel("Numero de clusters k")
+    axes[1].plot(df["k"], df["inercia"], "s-", color="#55a868", label="inercia")
+    axes[1].axvline(k_codo, color="#c44e52", linestyle="--", label=f"codo k={k_codo}")
+    axes[1].axvline(k_elegido, color="#55a868", linestyle=":", label=f"k elegido={k_elegido}")
+    axes[1].set_xlabel("Número de clusters k")
     axes[1].set_ylabel("Inercia")
-    axes[1].set_title("Inercia vs k")
+    axes[1].set_title("Inercia vs k (codo)")
     axes[1].legend()
     plt.tight_layout()
     return guardar_fig(ruta)
 
 
-# %%
-df_k, mejor_k = evaluar_k(X_pool, K_MIN, K_MAX, SEMILLA, MUESTRA_SILUETA)
-k = max(int(mejor_k), 2)
-k = min(k, len(X_pool) - 1)
+df_k, modelos_k = evaluar_k(
+    X_pool_esc, K_MIN, K_MAX, SEMILLA, MUESTRA_SILUETA
+)
+k_codo = detectar_codo(df_k)
+k_elegido = min(max(int(k_codo), 6), K_MAX)
 df_k.to_csv(SALIDA / "seleccion_k.csv", index=False, encoding="utf-8")
 
-print(f"\nk elegido: {k}")
+print(f"\nCodo detectado: k={k_codo}")
+print(f"k elegido: {k_elegido}")
+
+graficar_seleccion_k(
+    df_k, k_codo, k_elegido, FIGURAS / "p1_seleccion_k.png"
+)
+plt.show()
+plt.close("all")
 
 # %% [markdown]
-# ## 6. Entrenamiento final y representantes
-
+# ## 4. Entrenamiento final y distribución de clusters
+#
+# Se entrena `MiniBatchKMeans` con el `k` elegido y se guardan las figuras de
+# distribución de clusters, PCA coloreado por cluster, representantes y parches
+# por cluster.
+#
+# ### Etiquetado de representantes
+#
+# Clases iniciales: `agua`, `basura`, `muro`, `roca`, `terreno`, `vegetacion`,
+# `dudoso`. Si escribes una clase que no está en la lista, se agrega
+# automáticamente y queda guardada en `resultados_p1/clases.txt`.
+#
+# Para cada cluster verás el parche ampliado y la foto completa con el recuadro.
+# Escribe la clase y pulsa Enter. Opciones:
+#
+# - Enter vacío: saltar el cluster.
+# - `n`: ver el siguiente candidato del mismo cluster.
+# - `d`: marcar como dudoso (no se usa para entrenar).
+# - `s`: salir y guardar.
+#
+# Etiqueta un representante claro por cluster. Si un cluster mezcla clases, usa
+# `n` para buscar otro parche. El progreso se guarda en
+# `resultados_p1/etiquetas_representantes.csv`.
 
 # %%
-def graficar_diagrama_silueta(x, etiquetas, k, silueta_promedio, ruta, muestra):
-    rng = np.random.default_rng(SEMILLA)
-    cantidad = min(muestra, len(x))
-    sub = np.sort(rng.choice(len(x), size=cantidad, replace=False))
-    coeficientes = silhouette_samples(x[sub], etiquetas[sub])
-    etiquetas_sub = etiquetas[sub]
-    padding = max(1, cantidad // 40)
-    posicion = padding
-    ticks = []
-    fig, ax = plt.subplots(figsize=(9, max(5, 0.45 * k + 3)))
-    for cluster in range(k):
-        valores = np.sort(coeficientes[etiquetas_sub == cluster])
-        color = plt.cm.Spectral(cluster / max(k - 1, 1))
-        ax.fill_betweenx(
-            np.arange(posicion, posicion + len(valores)),
-            0,
-            valores,
-            facecolor=color,
-            edgecolor=color,
-            alpha=0.75,
-        )
-        ticks.append(posicion + len(valores) // 2)
-        posicion += len(valores) + padding
-    ax.yaxis.set_major_locator(FixedLocator(ticks))
-    ax.yaxis.set_major_formatter(FixedFormatter([str(i) for i in range(k)]))
-    ax.axvline(
-        silueta_promedio,
-        color="#c44e52",
-        linestyle="--",
-        label=f"promedio={silueta_promedio:.3f}",
+kmeans = nuevo_minibatch(k_elegido, SEMILLA, len(X_pool_esc)).fit(X_pool_esc)
+etiquetas_cluster = kmeans.labels_
+silueta_pool = float(
+    silhouette_score(
+        X_pool_esc,
+        etiquetas_cluster,
+        sample_size=int(min(MUESTRA_SILUETA, len(X_pool_esc))),
+        random_state=SEMILLA,
     )
-    ax.set_xlabel("Coeficiente de silueta")
-    ax.set_ylabel("Cluster")
-    ax.set_title(f"Diagrama de silueta para k={k}")
-    ax.legend(loc="lower right")
-    plt.tight_layout()
-    return guardar_fig(ruta)
+)
+conteos_cluster = np.bincount(etiquetas_cluster, minlength=kmeans.n_clusters)
 
-
-def graficar_centroides(modelo, ruta):
-    cantidad_clusters = modelo.n_clusters
-    columnas = min(6, cantidad_clusters)
-    filas = int(math.ceil(cantidad_clusters / columnas))
-    fig, axes = plt.subplots(
-        filas, columnas, figsize=(2.6 * columnas, 2.6 * filas), squeeze=False
-    )
-    for ax in axes.ravel():
-        ax.axis("off")
-    for cluster in range(cantidad_clusters):
-        ax = axes.ravel()[cluster]
-        centroide = modelo.cluster_centers_[cluster].reshape(TAM_PARCHE, TAM_PARCHE)
-        ax.imshow(centroide, cmap="gray")
-        ax.set_title(
-            f"Cluster {cluster}\nn={int((modelo.labels_ == cluster).sum())}",
-            fontsize=8,
-        )
-    plt.suptitle("Centroides (parche promedio) por cluster", fontsize=14)
-    plt.tight_layout()
-    return guardar_fig(ruta)
-
-
-def graficar_tamanos_cluster(etiquetas, ruta):
-    conteo = pd.Series(etiquetas).value_counts().sort_index()
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.bar(conteo.index.astype(str), conteo.values, color="#4c72b0")
-    ax.set_xlabel("Cluster")
-    ax.set_ylabel("Numero de parches")
-    ax.set_title("Tamano de cada cluster")
-    ax.grid(alpha=0.25)
-    plt.tight_layout()
-    return guardar_fig(ruta)
+print(f"MiniBatchKMeans final con k={k_elegido}")
+print(f"Silueta del pool: {silueta_pool:.4f}")
+print("Tamaño de clusters:")
+print(pd.Series(etiquetas_cluster).value_counts().sort_index().to_string())
 
 
 def obtener_representantes(modelo, x):
@@ -619,14 +877,53 @@ def obtener_representantes(modelo, x):
     return np.asarray(indices, dtype=int)
 
 
-def graficar_parches_por_cluster(x_plano, etiquetas_cluster, ruta, cantidad=8):
-    k = int(etiquetas_cluster.max()) + 1
+indices_representantes = obtener_representantes(kmeans, X_pool_esc)
+
+
+def graficar_distribucion_clusters(etiquetas, ruta):
+    conteo = pd.Series(etiquetas).value_counts().sort_index()
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    barras = ax.bar(conteo.index.astype(str), conteo.values, color="#4c72b0")
+    for barra, valor in zip(barras, conteo.values):
+        ax.text(
+            barra.get_x() + barra.get_width() / 2,
+            barra.get_height(),
+            str(int(valor)),
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
+    ax.set_xlabel("Cluster")
+    ax.set_ylabel("Número de parches")
+    ax.set_title("Distribución de parches por cluster (KMeans)")
+    ax.grid(alpha=0.25)
+    plt.tight_layout()
+    return guardar_fig(ruta)
+
+
+def graficar_pca_clusters(x, etiquetas, ruta):
+    pca = PCA(n_components=2, random_state=SEMILLA)
+    z = pca.fit_transform(x)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    dispersion = ax.scatter(
+        z[:, 0], z[:, 1], c=etiquetas, cmap="tab20", s=9, alpha=0.65
+    )
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    ax.set_title("PCA de características coloreado por cluster KMeans")
+    plt.colorbar(dispersion, ax=ax, label="cluster")
+    plt.tight_layout()
+    return guardar_fig(ruta)
+
+
+def graficar_parches_por_cluster(archivos, coords, etiquetas, ruta, cantidad=8):
+    k = int(etiquetas.max()) + 1
     rng = np.random.default_rng(SEMILLA)
     fig, axes = plt.subplots(
-        k, cantidad, figsize=(3.0 * cantidad, 2.6 * k), squeeze=False
+        k, cantidad, figsize=(2.8 * cantidad, 2.5 * k), squeeze=False
     )
     for cluster in range(k):
-        miembros = np.where(etiquetas_cluster == cluster)[0]
+        miembros = np.where(etiquetas == cluster)[0]
         elegidos = miembros
         if len(miembros) > cantidad:
             elegidos = np.sort(rng.choice(miembros, size=cantidad, replace=False))
@@ -634,19 +931,20 @@ def graficar_parches_por_cluster(x_plano, etiquetas_cluster, ruta, cantidad=8):
             ax = axes[cluster, rank]
             ax.axis("off")
             if rank < len(elegidos):
-                ax.imshow(
-                    x_plano[elegidos[rank]].reshape(TAM_PARCHE, TAM_PARCHE),
-                    cmap="gray",
+                indice = int(elegidos[rank])
+                parche = cargar_parche_rgb(
+                    archivos[indice], coords[indice, 0], coords[indice, 1]
                 )
-        axes[cluster, 0].set_ylabel(f"Cluster {cluster}", fontsize=9)
+                ax.imshow(parche)
+        axes[cluster, 0].set_ylabel(f"Cluster {cluster}", fontsize=8)
     plt.suptitle("Parches de ejemplo por cluster", fontsize=14)
     plt.tight_layout()
     return guardar_fig(ruta)
 
 
-def graficar_representantes(x_plano, indices, etiquetas, ruta):
+def graficar_representantes(archivos, coords, indices, etiquetas, ruta):
     validos = [
-        (i, idx, etiqueta)
+        (i, int(idx), etiqueta)
         for i, (idx, etiqueta) in enumerate(zip(indices, etiquetas))
         if idx >= 0
     ]
@@ -660,421 +958,169 @@ def graficar_representantes(x_plano, indices, etiquetas, ruta):
     for ax in axes.ravel():
         ax.axis("off")
     for ax, (cluster, idx, etiqueta) in zip(axes.ravel(), validos):
-        ax.imshow(x_plano[idx].reshape(TAM_PARCHE, TAM_PARCHE), cmap="gray")
+        parche = cargar_parche_rgb(
+            archivos[idx], coords[idx, 0], coords[idx, 1]
+        )
+        ax.imshow(parche)
         ax.set_title(f"Cluster {cluster}\n{etiqueta}", fontsize=8)
     plt.suptitle("Parches representativos de cada cluster", fontsize=14)
     plt.tight_layout()
     return guardar_fig(ruta)
 
 
-def graficar_contexto_representantes(df_reps, x_plano, carpeta, ruta):
-    filas = len(df_reps)
+def graficar_contexto_representantes(df, ruta):
+    df = df.head(8)
+    filas = len(df)
     fig, axes = plt.subplots(filas, 2, figsize=(11, 2.8 * filas), squeeze=False)
-    for i, (_, fila) in enumerate(df_reps.iterrows()):
-        parche = (
-            x_plano[int(fila["indice"])].reshape(TAM_PARCHE, TAM_PARCHE) * 255
-        ).astype(np.uint8)
-        imagen = np.asarray(
-            cargar_escala_grises(Path(carpeta) / str(fila["archivo"])),
-            dtype=np.uint8,
+    for i, (_, fila) in enumerate(df.iterrows()):
+        parche = cargar_parche_rgb(
+            fila["archivo"], int(fila["y"]), int(fila["x"])
         )
-        y, x = int(fila["y"]), int(fila["x"])
-        axes[i, 0].imshow(parche, cmap="gray")
-        axes[i, 0].set_title(f"C{int(fila['cluster'])} | {fila['clase']}", fontsize=9)
+        imagen = cargar_rgb(CARPETA_IMAGENES / str(fila["archivo"])).copy()
+        dibujo = ImageDraw.Draw(imagen)
+        x = int(fila["x"])
+        y = int(fila["y"])
+        dibujo.rectangle(
+            [x, y, x + TAM_PARCHE - 1, y + TAM_PARCHE - 1],
+            outline="red",
+            width=6,
+        )
+        imagen.thumbnail((800, 800), Image.Resampling.LANCZOS)
+        axes[i, 0].imshow(parche)
+        axes[i, 0].set_title(
+            f"C{int(fila['cluster'])} | {fila['clase']}", fontsize=9
+        )
         axes[i, 0].axis("off")
-        axes[i, 1].imshow(imagen, cmap="gray")
-        axes[i, 1].add_patch(
-            Rectangle(
-                (x, y),
-                TAM_PARCHE,
-                TAM_PARCHE,
-                fill=False,
-                edgecolor="red",
-                linewidth=3,
-            )
-        )
+        axes[i, 1].imshow(imagen)
         axes[i, 1].set_title(str(fila["archivo"]), fontsize=8)
         axes[i, 1].axis("off")
-    plt.suptitle("Representantes y su ubicacion en la imagen original", fontsize=14)
+    plt.suptitle("Representantes y su ubicación en la imagen original", fontsize=14)
     plt.tight_layout()
     return guardar_fig(ruta)
 
 
-# %%
-kmeans = nuevo_minibatch(k, SEMILLA, len(X_pool)).fit(X_pool)
-etiquetas_cluster = kmeans.labels_
-silueta_pool = float(
-    silhouette_score(
-        X_pool,
-        etiquetas_cluster,
-        sample_size=int(min(MUESTRA_SILUETA, len(X_pool))),
-        random_state=SEMILLA,
-    )
+graficar_distribucion_clusters(
+    etiquetas_cluster, FIGURAS / "p1_distribucion_clusters.png"
 )
-indices_representantes = obtener_representantes(kmeans, X_pool)
-
-print(f"\nMiniBatchKMeans final con k={k}")
-print(f"Silueta del pool: {silueta_pool:.4f}")
-print("Tamano de clusters:")
-print(pd.Series(etiquetas_cluster).value_counts().sort_index().to_string())
-
-graficar_seleccion_k(df_k, k, FIGURAS / "p1_seleccion_k.png")
-graficar_diagrama_silueta(
-    X_pool,
-    etiquetas_cluster,
-    k,
-    silueta_pool,
-    FIGURAS / "p1_diagrama_silueta.png",
-    MUESTRA_SILUETA,
+graficar_pca_clusters(
+    X_pool_esc, etiquetas_cluster, FIGURAS / "p1_pca_clusters.png"
 )
-graficar_centroides(kmeans, FIGURAS / "p1_centroides.png")
-graficar_tamanos_cluster(etiquetas_cluster, FIGURAS / "p1_tamanos_cluster.png")
 graficar_parches_por_cluster(
-    X_pool, etiquetas_cluster, FIGURAS / "p1_parches_por_cluster.png"
+    archivos_pool,
+    coords_pool,
+    etiquetas_cluster,
+    FIGURAS / "p1_parches_por_cluster.png",
 )
 plt.show()
 plt.close("all")
 
-# %% [markdown]
-# ## 7. Etiquetado interactivo de los parches representativos
-#
-# Cada representante se muestra como parche ampliado y como imagen completa con
-# el parche marcado en blanco. La clase se guarda en
-# `etiquetas_representantes.csv`.
-
-
-# %%
-def _bytes_patch(x_plano, indice, tamano=256):
-    parche = (x_plano[indice].reshape(TAM_PARCHE, TAM_PARCHE) * 255).astype(np.uint8)
-    imagen = Image.fromarray(parche, mode="L").resize(
-        (tamano, tamano), Image.Resampling.NEAREST
-    )
-    buffer = io.BytesIO()
-    imagen.convert("RGB").save(buffer, format="JPEG", quality=92)
-    return buffer.getvalue()
-
-
-def _bytes_contexto(ruta, coords, tamano=640):
-    imagen = cargar_escala_grises(ruta)
-    y, x = int(coords[0]), int(coords[1])
-    dibujo = ImageDraw.Draw(imagen)
-    dibujo.rectangle(
-        [x, y, x + TAM_PARCHE - 1, y + TAM_PARCHE - 1], outline="white", width=6
-    )
-    imagen.thumbnail((tamano, tamano), Image.Resampling.LANCZOS)
-    buffer = io.BytesIO()
-    imagen.convert("RGB").save(buffer, format="JPEG", quality=90)
-    return buffer.getvalue()
-
-
-def guardar_etiquetas(df, ruta):
-    ruta = Path(ruta)
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    columnas = [
-        c
-        for c in ["cluster", "indice", "archivo", "y", "x", "n_patches", "clase"]
-        if c in df.columns
-    ]
-    df[columnas].to_csv(ruta, index=False, encoding="utf-8")
-    return ruta
-
-
-def cargar_etiquetas(ruta, df, clave):
-    df = df.copy()
-    ruta = Path(ruta)
-    if not ruta.exists():
-        return df
-    guardadas = pd.read_csv(ruta, dtype=str, keep_default_na=False)
-    guardadas.columns = [c.strip().lower() for c in guardadas.columns]
-    if clave not in guardadas.columns or "clase" not in guardadas.columns:
-        return df
-    mapa = dict(
-        zip(
-            guardadas[clave].astype(int),
-            guardadas["clase"].astype(str).str.strip(),
-        )
-    )
-    df["clase"] = df[clave].map(mapa).fillna(df["clase"]).astype(str).str.strip()
-    return df
-
-
-def crear_etiquetador(df, x_plano, ruta_salida, clases_sugeridas, titulo):
-    if not WIDGETS_DISPONIBLES:
-        raise RuntimeError(
-            "Instale ipywidgets con: uv pip install --python .venv/bin/python "
-            "ipywidgets jupyterlab_widgets"
-        )
-
-    df = df.copy().reset_index(drop=True)
-    ruta_salida = Path(ruta_salida)
-    estado = {"pos": 0}
-
-    salida = widgets.Output(
-        layout={
-            "border": "1px solid #cccccc",
-            "min_height": "460px",
-            "width": "100%",
-        }
-    )
-    barra = widgets.IntProgress(
-        min=0, max=max(1, len(df)), value=0, description="Progreso"
-    )
-    progreso = widgets.HTML()
-    resumen_clases = widgets.HTML()
-    clase_texto = widgets.Text(
-        description="Clase:",
-        placeholder="ej. terreno",
-        layout=widgets.Layout(width="320px"),
-    )
-    clase_existente = widgets.Dropdown(
-        options=[""] + sorted(set(str(v) for v in clases_sugeridas)),
-        description="Existente:",
-        layout=widgets.Layout(width="260px"),
-    )
-    btn_anterior = widgets.Button(description="Anterior")
-    btn_siguiente = widgets.Button(description="Siguiente")
-    btn_guardar = widgets.Button(
-        description="Guardar y siguiente", button_style="success"
-    )
-    btn_borrar = widgets.Button(description="Borrar clase", button_style="warning")
-    btn_guardar_csv = widgets.Button(description="Guardar CSV", button_style="info")
-
-    def clases_disponibles():
-        clases = {str(v).strip() for v in df["clase"] if str(v).strip()}
-        clases.update({str(v).strip() for v in clases_sugeridas if str(v).strip()})
-        return sorted(clases)
-
-    def actualizar_contadores():
-        etiquetadas = int((df["clase"].astype(str).str.strip() != "").sum())
-        pendientes = len(df) - etiquetadas
-        partes = [
-            f"<b>Etiquetados:</b> {etiquetadas}/{len(df)}",
-            f"<b>Pendientes:</b> {pendientes}",
-        ]
-        conteos = df.loc[
-            df["clase"].astype(str).str.strip() != "", "clase"
-        ].value_counts()
-        if len(conteos):
-            detalle = " | ".join(f"{c}: {n}" for c, n in conteos.items())
-            partes.append(f"<b>Por clase:</b> {detalle}")
-        resumen_clases.value = " &nbsp;|&nbsp; ".join(partes)
-
-    def actualizar_clases():
-        valor = clase_existente.value
-        clase_existente.options = [""] + clases_disponibles()
-        if valor in clase_existente.options:
-            clase_existente.value = valor
-
-    def mostrar_actual():
-        if len(df) == 0:
-            with salida:
-                clear_output(wait=True)
-                print("No hay parches para etiquetar.")
-            return
-        estado["pos"] = min(max(estado["pos"], 0), len(df) - 1)
-        fila = df.iloc[estado["pos"]]
-        indice = int(fila["indice"])
-        clase_actual = str(fila["clase"]).strip()
-        try:
-            patch = _bytes_patch(x_plano, indice, 256)
-            contexto = _bytes_contexto(
-                Path(CARPETA_IMAGENES) / str(fila["archivo"]),
-                (fila["y"], fila["x"]),
-                640,
-            )
-            with salida:
-                clear_output(wait=True)
-                display(
-                    widgets.HBox(
-                        [
-                            widgets.Image(value=patch, format="jpeg", width=256),
-                            widgets.Image(value=contexto, format="jpeg", width=420),
-                        ]
-                    )
-                )
-                if "cluster" in fila.index and "n_patches" in fila.index:
-                    print(
-                        f"Cluster {int(fila['cluster'])} | "
-                        f"parches en el cluster: {int(fila['n_patches'])}"
-                    )
-                print(
-                    f"Archivo: {fila['archivo']} | y={int(fila['y'])} "
-                    f"x={int(fila['x'])}"
-                )
-                print(
-                    f"Clase actual: {clase_actual if clase_actual else '(sin etiquetar)'}"
-                )
-        except Exception as error:
-            with salida:
-                clear_output(wait=True)
-                print(f"No se pudo cargar el parche: {error}")
-        clase_texto.value = clase_actual
-        clase_existente.value = (
-            clase_actual if clase_actual in clase_existente.options else ""
-        )
-        barra.max = max(1, len(df))
-        barra.value = estado["pos"] + 1
-        progreso.value = f"<b>{estado['pos'] + 1} de {len(df)}</b>"
-        actualizar_contadores()
-
-    def guardar_y_siguiente(_):
-        clase = str(clase_texto.value).strip()
-        if not clase:
-            with salida:
-                print("Escriba o seleccione una clase antes de guardar.")
-            return
-        df.at[estado["pos"], "clase"] = clase
-        guardar_etiquetas(df, ruta_salida)
-        actualizar_clases()
-        estado["pos"] = min(estado["pos"] + 1, len(df) - 1)
-        mostrar_actual()
-
-    def ir_anterior(_):
-        estado["pos"] = max(0, estado["pos"] - 1)
-        mostrar_actual()
-
-    def ir_siguiente(_):
-        estado["pos"] = min(len(df) - 1, estado["pos"] + 1)
-        mostrar_actual()
-
-    def borrar_clase(_):
-        df.at[estado["pos"], "clase"] = ""
-        guardar_etiquetas(df, ruta_salida)
-        actualizar_clases()
-        mostrar_actual()
-
-    def guardar_csv(_):
-        guardar_etiquetas(df, ruta_salida)
-        with salida:
-            print(f"Etiquetas guardadas en: {ruta_salida}")
-
-    def elegir_existente(change):
-        if change["new"]:
-            clase_texto.value = change["new"]
-
-    btn_anterior.on_click(ir_anterior)
-    btn_siguiente.on_click(ir_siguiente)
-    btn_guardar.on_click(guardar_y_siguiente)
-    btn_borrar.on_click(borrar_clase)
-    btn_guardar_csv.on_click(guardar_csv)
-    clase_existente.observe(elegir_existente, names="value")
-
-    instrucciones = widgets.HTML(
-        f"<b>{titulo}.</b> Cada imagen muestra el parche y la imagen completa "
-        "con el parche marcado en blanco. Escriba o elija la clase del parche."
-    )
-    controles = widgets.HBox([clase_texto, clase_existente])
-    botones = widgets.HBox(
-        [btn_anterior, btn_siguiente, btn_guardar, btn_borrar, btn_guardar_csv]
-    )
-    panel = widgets.VBox(
-        [
-            instrucciones,
-            controles,
-            botones,
-            barra,
-            progreso,
-            resumen_clases,
-            salida,
-        ]
-    )
-    mostrar_actual()
-    return panel
-
-
-# %%
-validos = indices_representantes >= 0
-clusters_validos = np.arange(kmeans.n_clusters)[validos]
-indices_validos = indices_representantes[validos]
-conteos_cluster = np.bincount(etiquetas_cluster, minlength=kmeans.n_clusters)
 df_reps = pd.DataFrame(
     {
-        "cluster": clusters_validos.astype(int),
-        "indice": indices_validos.astype(int),
-        "archivo": archivos_pool[indices_validos].astype(str),
-        "y": coords_pool[indices_validos, 0].astype(int),
-        "x": coords_pool[indices_validos, 1].astype(int),
-        "n_patches": conteos_cluster[clusters_validos].astype(int),
+        "cluster": np.arange(kmeans.n_clusters),
+        "indice": indices_representantes.astype(int),
+        "archivo": [
+            archivos_pool[i] if i >= 0 else "" for i in indices_representantes
+        ],
+        "y": [
+            coords_pool[i, 0] if i >= 0 else -1 for i in indices_representantes
+        ],
+        "x": [
+            coords_pool[i, 1] if i >= 0 else -1 for i in indices_representantes
+        ],
+        "n_patches": conteos_cluster.astype(int),
         "clase": "",
     }
 )
 df_reps = cargar_etiquetas(ETIQUETAS_REPRESENTANTES, df_reps, "cluster")
 
+distancias_pool = kmeans.transform(X_pool_esc)
+candidatos = {}
+for cluster in range(kmeans.n_clusters):
+    miembros = np.where(etiquetas_cluster == cluster)[0]
+    orden = miembros[np.argsort(distancias_pool[miembros, cluster])][:5]
+    candidatos[cluster] = [
+        {
+            "indice": int(i),
+            "archivo": str(archivos_pool[i]),
+            "y": int(coords_pool[i, 0]),
+            "x": int(coords_pool[i, 1]),
+        }
+        for i in orden
+    ]
+
 if MODO_PRUEBA:
     df_reps["clase"] = [f"grupo_{int(c)}" for c in df_reps["cluster"]]
     guardar_etiquetas(df_reps, ETIQUETAS_REPRESENTANTES)
-
-print("Representantes por cluster")
-print(df_reps.to_string(index=False))
-
-if not MODO_PRUEBA:
-    display(
-        crear_etiquetador(
-            df_reps,
-            X_pool,
-            ETIQUETAS_REPRESENTANTES,
-            CLASES_SUGERIDAS,
-            "Etiquetado de representantes",
-        )
+else:
+    display(df_reps)
+    df_reps = etiquetar_representantes_prompt(
+        df_reps, candidatos, ETIQUETAS_REPRESENTANTES, CLASES
     )
 
-# %% [markdown]
-# ## 8. Carga de etiquetas de representantes
-#
-# Despues de etiquetar los representantes y pulsar **Guardar CSV**, ejecute esta
-# celda para cargar las etiquetas y construir el mapa de clases por cluster.
-
-# %%
-df_reps = cargar_etiquetas(ETIQUETAS_REPRESENTANTES, df_reps, "cluster")
-y_representantes = np.full(kmeans.n_clusters, None, dtype=object)
-for _, fila in df_reps.iterrows():
-    clase = str(fila["clase"]).strip()
-    if clase:
-        y_representantes[int(fila["cluster"])] = clase
-
-mapa_cluster_a_clase = {
-    cluster: clase for cluster, clase in enumerate(y_representantes) if clase
-}
-if not mapa_cluster_a_clase:
-    raise RuntimeError("Etiquete al menos un representante antes de continuar")
-
-print("Etiquetas de representantes cargadas")
-for cluster, clase in enumerate(y_representantes):
-    print(f"Cluster {cluster:2d} -> {clase if clase else '(sin etiquetar)'}")
-
+etiquetas_reps_grafico = [
+    str(df_reps.at[i, "clase"]).strip() if str(df_reps.at[i, "clase"]).strip() else f"C{int(df_reps.at[i, 'cluster'])}"
+    for i in range(len(df_reps))
+]
 graficar_representantes(
-    X_pool,
-    indices_representantes,
-    y_representantes,
+    archivos_pool,
+    coords_pool,
+    df_reps["indice"].to_numpy(dtype=int),
+    etiquetas_reps_grafico,
     FIGURAS / "p1_representantes.png",
 )
 graficar_contexto_representantes(
-    df_reps, X_pool, CARPETA_IMAGENES, FIGURAS / "p1_contexto_representantes.png"
+    df_reps, FIGURAS / "p1_contexto_representantes.png"
 )
 plt.show()
 plt.close("all")
 
 # %% [markdown]
-# ## 9. Etiquetado interactivo del conjunto de prueba
+# ## 5. Etiquetado de parches de prueba
 #
-# Se muestran parches de las escenas reservadas para prueba, muestreados por
-# cluster predicho (`PARCHES_TEST_POR_CLUSTER` por cluster) para cubrir todos los
-# grupos. Etiquete al menos unos pocos por clase y pulse **Guardar CSV**. Las
-# etiquetas quedan en `etiquetas_test.csv`.
+# Se muestrean parches por cluster y se etiquetan manualmente. El número por
+# cluster se ajusta para que el total ronde las 86 etiquetas.
+#
+# Para cada parche verás el recorte y la foto completa con el recuadro. Usa las
+# mismas opciones: Enter para saltar, `d` para dudoso y `s` para salir y guardar.
+# Si escribes una clase nueva, se agrega automáticamente a la lista y se guarda
+# en `resultados_p1/clases.txt`. Procura cubrir todas las clases; si falta
+# alguna, etiqueta más parches de los clusters donde aparezca. El progreso queda
+# en `resultados_p1/etiquetas_test.csv`.
 
 # %%
-etiquetas_test_pred = kmeans.predict(X_test)
+n_test_por_cluster = max(
+    1,
+    int(
+        (
+            OBJETIVO_ETIQUETAS
+            - k_elegido
+            - 2 * N_ACTIVO * REPETICIONES_ACTIVO
+            - N_COBERTURA
+        )
+        / max(1, k_elegido)
+    ),
+)
+print(
+    f"k elegido={k_elegido} | representantes={k_elegido} | "
+    f"prueba por cluster={n_test_por_cluster} | "
+    f"prueba total≈{k_elegido * n_test_por_cluster} | "
+    f"activo+aleatorio={2 * N_ACTIVO * REPETICIONES_ACTIVO} | "
+    f"cobertura≤{N_COBERTURA}"
+)
+etiquetas_test_pred = kmeans.predict(X_test_esc)
 indices_test = []
 for cluster in range(kmeans.n_clusters):
     miembros = np.where(etiquetas_test_pred == cluster)[0]
+    if len(miembros) == 0:
+        continue
     rng_cluster = np.random.default_rng(SEMILLA + 1 + cluster)
     elegidos = rng_cluster.choice(
         miembros,
-        size=min(PARCHES_TEST_POR_CLUSTER, len(miembros)),
+        size=min(n_test_por_cluster, len(miembros)),
         replace=False,
     )
     indices_test.append(elegidos)
-indices_test = np.sort(np.concatenate(indices_test).astype(int))
+indices_test = np.sort(np.concatenate(indices_test).astype(int)) if indices_test else np.array([], dtype=int)
 
 df_test_parches = pd.DataFrame(
     {
@@ -1090,36 +1136,27 @@ df_test_parches = cargar_etiquetas(ETIQUETAS_TEST, df_test_parches, "indice")
 
 if MODO_PRUEBA:
     df_test_parches["clase"] = [
-        mapa_cluster_a_clase.get(int(c), "sin_etiqueta")
-        for c in etiquetas_test_pred[indices_test]
+        f"grupo_{int(c)}" for c in df_test_parches["cluster"]
     ]
     guardar_etiquetas(df_test_parches, ETIQUETAS_TEST)
-
-print("Parches de prueba a etiquetar")
-print(df_test_parches.to_string(index=False))
-
-if not MODO_PRUEBA:
-    display(
-        crear_etiquetador(
-            df_test_parches,
-            X_test,
-            ETIQUETAS_TEST,
-            sorted(mapa_cluster_a_clase.values()),
-            "Etiquetado del conjunto de prueba",
-        )
+else:
+    display(df_test_parches)
+    df_test_parches = etiquetar_lote_prompt(
+        df_test_parches,
+        ETIQUETAS_TEST,
+        "indice",
+        "Etiquetado de prueba",
+        CLASES,
     )
 
-# %% [markdown]
-# ## 10. Conjunto de prueba etiquetado
-
-# %%
-df_test_parches = cargar_etiquetas(ETIQUETAS_TEST, df_test_parches, "indice")
-mascara_test = df_test_parches["clase"].astype(str).str.strip() != ""
-if not mascara_test.any():
-    raise RuntimeError("Etiquete al menos un parche del conjunto de prueba")
+mascara_test = df_test_parches["clase"].astype(str).str.strip().isin(CLASES)
+if not mascara_test.any() and not MODO_PRUEBA:
+    raise RuntimeError("Etiquete al menos un parche de prueba antes de continuar")
+if MODO_PRUEBA and not mascara_test.any():
+    mascara_test = df_test_parches["clase"].astype(str).str.strip() != ""
 
 indices_test_etq = df_test_parches.loc[mascara_test, "indice"].to_numpy(dtype=int)
-X_test_etq = X_test[indices_test_etq]
+X_test_etq = X_test_esc[indices_test_etq]
 y_test_etq = df_test_parches.loc[mascara_test, "clase"].to_numpy(dtype=object)
 
 print(f"Parches de prueba etiquetados: {len(y_test_etq)}")
@@ -1131,17 +1168,155 @@ df_test_resumen = pd.DataFrame(
         "n_parches": pd.Series(y_test_etq).value_counts().values,
     }
 )
-df_test_resumen["n_imagenes"] = [
-    len(np.unique(np.asarray(archivos_test)[indices_test_etq][y_test_etq == clase]))
-    for clase in df_test_resumen["clase"]
-]
 df_test_resumen.to_csv(SALIDA / "resumen_test.csv", index=False, encoding="utf-8")
-print("\nClases en el conjunto de prueba (etiquetadas)")
-print(df_test_resumen.to_string(index=False))
 
 # %% [markdown]
-# ## 11. Propagacion semi-supervisada y clasificadores
+# ## 6. Cobertura de clases y etiquetas extra
+#
+# Si algún cluster representante no cubre las 6 clases, se piden etiquetas
+# adicionales de parches aleatorios del pool.
 
+# %%
+y_representantes = np.array(
+    [
+        str(df_reps.at[i, "clase"]).strip()
+        if str(df_reps.at[i, "clase"]).strip() not in ("", "dudoso")
+        else None
+        for i in range(len(df_reps))
+    ],
+    dtype=object,
+)
+if MODO_PRUEBA:
+    clases_entrenamiento = sorted(
+        set(str(v) for v in y_representantes if v) | set(y_test_etq)
+    )
+else:
+    clases_entrenamiento = sorted(
+        (
+            set(CLASES)
+            | set(str(v) for v in y_representantes if v)
+            | set(y_test_etq)
+        )
+        - {"", "dudoso"}
+    )
+
+indices_reps_etq = df_reps.loc[
+    df_reps["clase"].astype(str).str.strip().isin(clases_entrenamiento),
+    "indice",
+].to_numpy(dtype=int)
+y_reps_etq = df_reps.loc[
+    df_reps["clase"].astype(str).str.strip().isin(clases_entrenamiento),
+    "clase",
+].to_numpy(dtype=object)
+
+df_cob_prev = pd.DataFrame(columns=["indice", "archivo", "y", "x", "clase"])
+if ETIQUETAS_COBERTURA.exists():
+    df_cob_prev = pd.read_csv(
+        ETIQUETAS_COBERTURA, dtype=str, keep_default_na=False
+    )
+    df_cob_prev.columns = [c.strip().lower() for c in df_cob_prev.columns]
+    for columna in ["indice", "y", "x"]:
+        if columna in df_cob_prev.columns:
+            df_cob_prev[columna] = (
+                pd.to_numeric(df_cob_prev[columna], errors="coerce")
+                .fillna(-1)
+                .astype(int)
+            )
+indices_cob_prev = (
+    set(df_cob_prev["indice"].tolist())
+    if "indice" in df_cob_prev.columns
+    else set()
+)
+
+df_cobertura = pd.DataFrame(columns=["indice", "archivo", "y", "x", "clase"])
+if not MODO_PRUEBA:
+    faltantes = [c for c in CLASES if c not in set(y_reps_etq)]
+    print(f"Clases en representantes: {sorted(set(y_reps_etq))}")
+    print(f"Clases faltantes: {faltantes}")
+    if faltantes and N_COBERTURA > 0:
+        indices_usados = set(indices_reps_etq.tolist()) | indices_cob_prev
+        candidatos_extra = [
+            i for i in range(len(X_pool_esc)) if i not in indices_usados
+        ]
+        rng_extra = np.random.default_rng(SEMILLA + 77 + len(indices_cob_prev))
+        elegidos_extra = rng_extra.choice(
+            candidatos_extra,
+            size=min(N_COBERTURA, len(candidatos_extra)),
+            replace=False,
+        )
+        df_cob_nuevo = pd.DataFrame(
+            {
+                "indice": elegidos_extra,
+                "archivo": archivos_pool[elegidos_extra].astype(str),
+                "y": coords_pool[elegidos_extra, 0].astype(int),
+                "x": coords_pool[elegidos_extra, 1].astype(int),
+                "clase": "",
+            }
+        )
+        df_cobertura = pd.concat(
+            [df_cob_prev, df_cob_nuevo], ignore_index=True
+        )
+        df_cobertura = (
+            df_cobertura.drop_duplicates("indice", keep="last")
+            .reset_index(drop=True)
+        )
+        for columna in ["indice", "archivo", "y", "x", "clase"]:
+            if columna not in df_cobertura.columns:
+                df_cobertura[columna] = ""
+        df_cobertura = cargar_etiquetas(
+            ETIQUETAS_COBERTURA, df_cobertura, "indice"
+        )
+        display(df_cobertura)
+        df_cobertura = etiquetar_lote_prompt(
+            df_cobertura,
+            ETIQUETAS_COBERTURA,
+            "indice",
+            "Cobertura de clases",
+            CLASES,
+        )
+        mascara_cob = df_cobertura["clase"].astype(str).str.strip().isin(CLASES)
+        df_cobertura = df_cobertura.loc[mascara_cob].reset_index(drop=True)
+    else:
+        df_cobertura = df_cob_prev.copy()
+        if len(df_cobertura):
+            df_cobertura = cargar_etiquetas(
+                ETIQUETAS_COBERTURA, df_cobertura, "indice"
+            )
+            mascara_cob = (
+                df_cobertura["clase"].astype(str).str.strip().isin(CLASES)
+            )
+            df_cobertura = df_cobertura.loc[mascara_cob].reset_index(drop=True)
+else:
+    df_cobertura = pd.DataFrame(
+        columns=["indice", "archivo", "y", "x", "clase"]
+    )
+
+if len(df_cobertura):
+    indices_reps_extra = np.concatenate(
+        [
+            indices_reps_etq,
+            df_cobertura["indice"].to_numpy(dtype=int),
+        ]
+    )
+    y_reps_extra = np.concatenate(
+        [
+            y_reps_etq,
+            df_cobertura["clase"].to_numpy(dtype=object),
+        ]
+    )
+else:
+    indices_reps_extra = indices_reps_etq
+    y_reps_extra = y_reps_etq
+
+X_reps_extra = X_pool_esc[indices_reps_extra]
+print(f"Etiquetas fuertes para representantes/cobertura: {len(y_reps_extra)}")
+print(pd.Series(y_reps_extra).value_counts().to_string())
+
+# %% [markdown]
+# ## 7. Propagación semi-supervisada
+#
+# Cada cluster recibe la clase de su representante y se propaga a todos sus
+# parches. Luego se entrena una regresión logística.
 
 # %%
 def propagar_etiquetas(etiquetas_cluster, y_representantes):
@@ -1167,29 +1342,51 @@ def nuevo_clasificador(semilla):
 def entrenar_modelo(x, y, semilla):
     if len(np.unique(y)) < 2:
         raise RuntimeError(
-            "Se necesitan al menos dos clases distintas para entrenar. "
-            "Etiquete al menos dos representantes con clases diferentes."
+            "Se necesitan al menos dos clases distintas para entrenar."
         )
     return nuevo_clasificador(semilla).fit(x, y)
 
 
-def muestra_estratificada(y, n, rng):
-    clases_unicas = np.unique(y)
-    if len(clases_unicas) < 2:
-        return rng.choice(len(y), size=min(n, len(y)), replace=False)
-    indices = []
-    for clase in clases_unicas:
-        candidatos = np.where(y == clase)[0]
-        indices.append(int(rng.choice(candidatos)))
-    restantes = np.setdiff1d(np.arange(len(y)), np.asarray(indices, dtype=int))
-    if len(indices) < n and len(restantes) > 0:
-        extra = rng.choice(
-            restantes, size=min(n - len(indices), len(restantes)), replace=False
-        )
-        indices.extend(extra.tolist())
-    return np.asarray(indices, dtype=int)
+y_propagadas, mascara_propagada = propagar_etiquetas(
+    etiquetas_cluster, y_representantes
+)
+if not mascara_propagada.any():
+    raise RuntimeError("No fue posible propagar etiquetas desde los representantes")
 
+X_train_prop = X_pool_esc[mascara_propagada]
+y_train_prop = y_propagadas[mascara_propagada]
+mascara_validas = np.isin(y_train_prop, clases_entrenamiento)
+X_train_prop = X_train_prop[mascara_validas]
+y_train_prop = y_train_prop[mascara_validas]
 
+X_train = np.vstack([X_train_prop, X_reps_extra])
+y_train = np.concatenate([y_train_prop, y_reps_extra])
+
+clases_eval = np.asarray(sorted(set(y_train) | set(y_test_etq)))
+faltantes_train = sorted(set(clases_eval) - set(y_train))
+faltantes_test = sorted(set(clases_eval) - set(y_test_etq))
+if faltantes_train:
+    print(f"Aviso: clases sin ejemplos en entrenamiento: {faltantes_train}")
+if faltantes_test:
+    print(f"Aviso: clases sin ejemplos en prueba: {faltantes_test}")
+
+if len(y_reps_extra) == 0:
+    raise RuntimeError("Etiquete al menos un representante antes de continuar")
+
+clf_reps = entrenar_modelo(X_reps_extra, y_reps_extra, SEMILLA)
+clf_base = entrenar_modelo(X_train, y_train, SEMILLA)
+
+print(f"Parches con etiqueta propagada: {int(mascara_propagada.sum())} / {len(X_pool_esc)}")
+print(f"Etiquetas fuertes: {len(y_reps_extra)}")
+print(f"Clases evaluadas: {clases_eval.tolist()}")
+
+# %% [markdown]
+# ## 8. Evaluación del modelo semi-supervisado
+#
+# Se comparan “solo representantes” y “propagación”, y se guardan métricas,
+# matriz de confusión, distribución de clases reales vs predichas y PCA por clase.
+
+# %%
 def calcular_metricas(nombre, clasificador, x, y, clases):
     y_pred = clasificador.predict(x)
     exactitud = float(accuracy_score(y, y_pred))
@@ -1211,80 +1408,6 @@ def calcular_metricas(nombre, clasificador, x, y, clases):
     }
 
 
-def promedio_metricas(lista_metricas):
-    claves_numericas = [c for c in lista_metricas[0] if c != "modelo"]
-    resultado = {"modelo": lista_metricas[0]["modelo"]}
-    for clave in claves_numericas:
-        resultado[clave] = float(np.mean([fila[clave] for fila in lista_metricas]))
-    return resultado
-
-
-# %%
-y_propagadas, mascara_propagada = propagar_etiquetas(
-    etiquetas_cluster, y_representantes
-)
-if not mascara_propagada.any():
-    raise RuntimeError("No fue posible propagar etiquetas desde los representantes")
-
-X_train = X_pool[mascara_propagada]
-y_train = y_propagadas[mascara_propagada]
-
-if len(np.unique(y_train)) < 2:
-    raise RuntimeError(
-        "La propagacion genero una sola clase. Etiquete al menos dos "
-        "representantes con clases diferentes antes de continuar."
-    )
-
-clases = np.asarray(sorted(set(y_train) | set(y_test_etq)))
-
-faltantes_test = sorted(set(y_test_etq) - set(y_train))
-if faltantes_test:
-    print(f"Aviso: clases del test que no estan en el entrenamiento: {faltantes_test}")
-
-reps_etiquetados = df_reps[df_reps["clase"].astype(str).str.strip() != ""]
-indices_reps_etq = reps_etiquetados["indice"].to_numpy(dtype=int)
-y_reps_etq = reps_etiquetados["clase"].to_numpy(dtype=object)
-
-clf_reps = entrenar_modelo(X_pool[indices_reps_etq], y_reps_etq, SEMILLA)
-clf_base = entrenar_modelo(X_train, y_train, SEMILLA)
-
-probas = clf_base.predict_proba(X_train)
-confianza = probas.max(axis=1)
-n_inciertas = max(2, int(round(FRAC_INCIERTAS * len(X_train))))
-n_inciertas = min(n_inciertas, len(X_train))
-idx_inciertas = np.argsort(confianza)[:n_inciertas]
-while len(np.unique(y_train[idx_inciertas])) < 2 and n_inciertas < len(X_train):
-    n_inciertas += 1
-    idx_inciertas = np.argsort(confianza)[:n_inciertas]
-clf_inciertas = entrenar_modelo(
-    X_train[idx_inciertas], y_train[idx_inciertas], SEMILLA + 100
-)
-
-print(f"Parches con etiqueta propagada: {int(mascara_propagada.sum())} / {len(X_pool)}")
-print(f"Muestras mas inciertas seleccionadas: {n_inciertas}")
-
-df_clases = pd.DataFrame(
-    {
-        "clase": pd.Series(y_train).value_counts().index,
-        "n_parches": pd.Series(y_train).value_counts().values,
-    }
-)
-df_clases["n_imagenes"] = [
-    len(np.unique(np.asarray(archivos_pool)[mascara_propagada][y_train == clase]))
-    for clase in df_clases["clase"]
-]
-df_clases["n_clusters"] = [
-    int(sum(1 for c in y_representantes if c == clase)) for clase in df_clases["clase"]
-]
-df_clases.to_csv(SALIDA / "resumen_clases.csv", index=False, encoding="utf-8")
-print("\nClases en el entrenamiento (propagadas)")
-print(df_clases.to_string(index=False))
-
-# %% [markdown]
-# ## 12. Evaluacion y aprendizaje activo
-
-
-# %%
 def graficar_comparacion_modelos(df_metricas, ruta):
     df = df_metricas.copy()
     etiquetas = df["modelo"].astype(str).tolist()
@@ -1298,7 +1421,7 @@ def graficar_comparacion_modelos(df_metricas, ruta):
     ax.set_xticklabels(etiquetas, rotation=25, ha="right")
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("Valor")
-    ax.set_title("Comparacion de modelos")
+    ax.set_title("Comparación de modelos")
     ax.legend(ncol=2)
     plt.tight_layout()
     return guardar_fig(ruta)
@@ -1315,7 +1438,7 @@ def graficar_confusion(y, y_pred, clases, ruta, titulo):
     ax.set_yticks(np.arange(cantidad))
     ax.set_xticklabels(clases, rotation=45, ha="right")
     ax.set_yticklabels(clases)
-    ax.set_xlabel("Prediccion")
+    ax.set_xlabel("Predicción")
     ax.set_ylabel("Clase real")
     ax.set_title(titulo)
     if cantidad <= 15:
@@ -1336,93 +1459,71 @@ def graficar_confusion(y, y_pred, clases, ruta, titulo):
     return guardar_fig(ruta)
 
 
-# %%
-metricas = []
-metricas.append(
-    calcular_metricas(
-        f"solo_representantes_{len(indices_reps_etq)}",
-        clf_reps,
-        X_test_etq,
-        y_test_etq,
-        clases,
-    )
-)
-metricas.append(
-    calcular_metricas(
-        f"propagacion_kmeans_k{k}",
-        clf_base,
-        X_test_etq,
-        y_test_etq,
-        clases,
-    )
-)
-metricas.append(
-    calcular_metricas(
-        f"activo_inciertas_{n_inciertas}",
-        clf_inciertas,
-        X_test_etq,
-        y_test_etq,
-        clases,
-    )
-)
+def graficar_distribucion_clases(y_true, y_pred, clases, ruta, titulo):
+    real = pd.Series(y_true).value_counts().reindex(clases, fill_value=0)
+    pred = pd.Series(y_pred).value_counts().reindex(clases, fill_value=0)
+    x = np.arange(len(clases))
+    ancho = 0.38
+    fig, ax = plt.subplots(figsize=(max(9, 0.9 * len(clases) + 4), 4.8))
+    ax.bar(x - ancho / 2, real.values, width=ancho, label="real", color="#4c72b0")
+    ax.bar(x + ancho / 2, pred.values, width=ancho, label="predicha", color="#55a868")
+    ax.set_xticks(x)
+    ax.set_xticklabels(clases, rotation=30, ha="right")
+    ax.set_ylabel("Número de parches")
+    ax.set_title(titulo)
+    ax.legend()
+    plt.tight_layout()
+    return guardar_fig(ruta)
 
-metricas_aleatorias = []
-for repeticion in range(REPETICIONES_ACTIVO):
-    idx_aleatorio = muestra_estratificada(
-        y_train, n_inciertas, np.random.default_rng(SEMILLA + repeticion)
-    )
-    clf_aleatorio = entrenar_modelo(
-        X_train[idx_aleatorio], y_train[idx_aleatorio], SEMILLA + repeticion
-    )
-    metricas_aleatorias.append(
-        calcular_metricas(
-            f"aleatorio_{len(idx_aleatorio)}",
-            clf_aleatorio,
-            X_test_etq,
-            y_test_etq,
-            clases,
+
+def graficar_pca_clases(x_pool, x_labeled, y_labeled, ruta):
+    pca = PCA(n_components=2, random_state=SEMILLA)
+    z_pool = pca.fit_transform(x_pool)
+    z_labeled = pca.transform(x_labeled)
+    clases = sorted(set(y_labeled))
+    cmap = plt.get_cmap("tab20")
+    colores = {clase: cmap(i % 20) for i, clase in enumerate(clases)}
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(z_pool[:, 0], z_pool[:, 1], c="#d9d9d9", s=6, alpha=0.35)
+    for clase in clases:
+        mascara = np.asarray(y_labeled) == clase
+        ax.scatter(
+            z_labeled[mascara, 0],
+            z_labeled[mascara, 1],
+            c=[colores[clase]],
+            s=35,
+            alpha=0.9,
+            label=str(clase),
         )
-    )
-metricas.append(promedio_metricas(metricas_aleatorias))
-
-df_metricas = pd.DataFrame(metricas)
-df_metricas.to_csv(SALIDA / "metricas_modelos.csv", index=False, encoding="utf-8")
-print("Metricas de evaluacion")
-print(df_metricas.to_string(index=False))
-
-graficar_comparacion_modelos(df_metricas, FIGURAS / "p1_comparacion_modelos.png")
-plt.show()
-plt.close("all")
-
-# %% [markdown]
-# ## 13. Matriz de confusion e inciertos
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+    ax.set_title("PCA del pool y clases reales del conjunto etiquetado")
+    ax.legend(markerscale=1.5, fontsize=8)
+    plt.tight_layout()
+    return guardar_fig(ruta)
 
 
-# %%
-def graficar_inciertos(x_plano, clasificador, archivos, coords, y, ruta, cantidad=50):
+def graficar_inciertos(x, archivos, coords, clasificador, ruta, cantidad=50):
     if clasificador is None or not hasattr(clasificador, "predict_proba"):
         return None
-    try:
-        probabilidades = clasificador.predict_proba(x_plano)
-    except Exception:
-        return None
+    probabilidades = clasificador.predict_proba(x)
     confianza = probabilidades.max(axis=1)
-    predicciones = clasificador.predict(x_plano)
-    orden = np.argsort(confianza)[: min(int(cantidad), len(x_plano))]
+    predicciones = clasificador.predict(x)
+    orden = np.argsort(confianza)[: min(int(cantidad), len(x))]
     columnas = 5
     filas = int(math.ceil(len(orden) / columnas))
     fig, axes = plt.subplots(
-        filas,
-        columnas,
-        figsize=(3.0 * columnas, 2.6 * filas),
-        squeeze=False,
+        filas, columnas, figsize=(3.0 * columnas, 2.8 * filas), squeeze=False
     )
     axes = axes.ravel()
     for ax in axes:
         ax.axis("off")
     registros = []
     for ax, indice in zip(axes, orden):
-        ax.imshow(x_plano[indice].reshape(TAM_PARCHE, TAM_PARCHE), cmap="gray")
+        parche = cargar_parche_rgb(
+            archivos[indice], coords[indice, 0], coords[indice, 1]
+        )
+        ax.imshow(parche)
         ax.set_title(
             f"{predicciones[indice]} | conf={confianza[indice]:.3f}", fontsize=7
         )
@@ -1432,21 +1533,21 @@ def graficar_inciertos(x_plano, clasificador, archivos, coords, y, ruta, cantida
                 "archivo": str(archivos[indice]),
                 "y": int(coords[indice, 0]),
                 "x": int(coords[indice, 1]),
-                "clase_real": str(y[indice]),
+                "clase_real": "sin etiqueta",
                 "clase_predicha": str(predicciones[indice]),
                 "confianza": float(confianza[indice]),
             }
         )
-    plt.suptitle("Parches mas inciertos segun el modelo", fontsize=14)
+    plt.suptitle("Parches más inciertos según el modelo", fontsize=14)
     plt.tight_layout()
     guardar_fig(ruta)
     return pd.DataFrame(registros)
 
 
-def graficar_muestras(x_plano, y, ruta, cantidad=10, titulo="Ejemplos de parches"):
+def graficar_muestras(archivos, coords, y, ruta, cantidad=15, titulo="Parches de prueba"):
     rng = np.random.default_rng(SEMILLA)
-    cantidad = min(cantidad, len(x_plano))
-    indices = rng.choice(len(x_plano), size=cantidad, replace=False)
+    cantidad = min(cantidad, len(archivos))
+    indices = rng.choice(len(archivos), size=cantidad, replace=False)
     columnas = min(5, cantidad)
     filas = int(math.ceil(cantidad / columnas))
     fig, axes = plt.subplots(filas, columnas, figsize=(3.0 * columnas, 3.0 * filas))
@@ -1454,41 +1555,79 @@ def graficar_muestras(x_plano, y, ruta, cantidad=10, titulo="Ejemplos de parches
     for ax in axes:
         ax.axis("off")
     for ax, idx in zip(axes, indices):
-        ax.imshow(x_plano[idx].reshape(TAM_PARCHE, TAM_PARCHE), cmap="gray")
+        parche = cargar_parche_rgb(
+            archivos[idx], coords[idx, 0], coords[idx, 1]
+        )
+        ax.imshow(parche)
         ax.set_title(str(y[idx]), fontsize=9)
     plt.suptitle(titulo, fontsize=14)
     plt.tight_layout()
     return guardar_fig(ruta)
 
 
-# %%
+metricas = []
+metricas.append(
+    calcular_metricas(
+        f"solo_representantes_{len(y_reps_extra)}",
+        clf_reps,
+        X_test_etq,
+        y_test_etq,
+        clases_eval,
+    )
+)
+metricas.append(
+    calcular_metricas(
+        f"propagacion_kmeans_k{k_elegido}",
+        clf_base,
+        X_test_etq,
+        y_test_etq,
+        clases_eval,
+    )
+)
+
+df_metricas = pd.DataFrame(metricas)
+df_metricas.to_csv(SALIDA / "metricas_modelos.csv", index=False, encoding="utf-8")
+print("Métricas de evaluación")
+print(df_metricas.to_string(index=False))
+
+graficar_comparacion_modelos(
+    df_metricas, FIGURAS / "p1_comparacion_modelos.png"
+)
 y_pred_base = clf_base.predict(X_test_etq)
 graficar_confusion(
     y_test_etq,
     y_pred_base,
-    clases,
+    clases_eval,
     FIGURAS / "p1_matriz_confusion.png",
-    "Matriz de confusion del modelo semi-supervisado (propagacion)",
+    "Matriz de confusión del modelo semi-supervisado",
 )
-plt.show()
-plt.close("all")
-
-graficar_muestras(
+graficar_distribucion_clases(
+    y_test_etq,
+    y_pred_base,
+    clases_eval,
+    FIGURAS / "p1_distribucion_clases.png",
+    "Distribución real vs predicha (semi-supervisado)",
+)
+graficar_pca_clases(
+    X_pool_esc,
     X_test_etq,
     y_test_etq,
+    FIGURAS / "p1_pca_clases.png",
+)
+graficar_muestras(
+    archivos_test[indices_test_etq],
+    coords_test[indices_test_etq],
+    y_test_etq,
     FIGURAS / "p1_muestras_test.png",
-    cantidad=15,
-    titulo="Ejemplos de parches del conjunto de prueba",
 )
 plt.show()
 plt.close("all")
 
 inciertos = graficar_inciertos(
-    X_train,
+    X_train_prop,
+    archivos_pool[mascara_propagada][mascara_validas],
+    coords_pool[mascara_propagada][mascara_validas],
     clf_base,
-    archivos_pool[mascara_propagada],
-    coords_pool[mascara_propagada],
-    y_train,
     FIGURAS / "p1_inciertos.png",
     cantidad=50,
 )
@@ -1500,17 +1639,171 @@ plt.close("all")
 reporte = classification_report(
     y_test_etq,
     y_pred_base,
-    labels=clases,
+    labels=clases_eval,
     output_dict=True,
     zero_division=0,
 )
 pd.DataFrame(reporte).transpose().to_csv(
-    SALIDA / "classification_report.csv",
-    encoding="utf-8",
+    SALIDA / "classification_report.csv", encoding="utf-8"
 )
 
+
 # %% [markdown]
-# ## 14. Resumen final
+# ## 9. Aprendizaje activo vs muestreo aleatorio
+#
+# Se parte de las etiquetas fuertes (representantes y cobertura). En cada ronda
+# el modelo activo elige los parches de menor margen; el modelo aleatorio elige
+# parches al azar. Ambos se evalúan sobre el mismo conjunto de prueba.
+
+# %%
+def entrenar_y_evaluar(x, y):
+    clasificador = entrenar_modelo(x, y, SEMILLA)
+    exactitud = float(accuracy_score(y_test_etq, clasificador.predict(X_test_etq)))
+    return clasificador, exactitud
+
+
+def seleccionar_inciertos(clasificador, x_pool, indices_disponibles, cantidad, rng):
+    probabilidades = clasificador.predict_proba(x_pool[indices_disponibles])
+    orden = np.argsort(probabilidades, axis=1)
+    top1 = orden[:, -1]
+    top2 = orden[:, -2]
+    margen = probabilidades[np.arange(len(top1)), top1] - probabilidades[
+        np.arange(len(top2)), top2
+    ]
+    confianza = probabilidades[np.arange(len(top1)), top1]
+    prediccion = clasificador.classes_[top1]
+    ordenados = np.argsort(margen)
+    elegidos = np.asarray(indices_disponibles)[ordenados[:cantidad]]
+    return elegidos, prediccion[ordenados[:cantidad]], confianza[ordenados[:cantidad]], margen[ordenados[:cantidad]]
+
+
+def construir_df_ronda(indices, predicciones, confianzas, margenes):
+    return pd.DataFrame(
+        {
+            "indice": np.asarray(indices, dtype=int),
+            "archivo": archivos_pool[indices].astype(str),
+            "y": coords_pool[indices, 0].astype(int),
+            "x": coords_pool[indices, 1].astype(int),
+            "prediccion": np.asarray(predicciones, dtype=str),
+            "confianza": np.asarray(confianzas, dtype=float),
+            "margen": np.asarray(margenes, dtype=float),
+            "clase": "",
+        }
+    )
+
+
+def ejecutar_metodo(metodo, ruta_etiquetas, titulo):
+    indices_lab = set(indices_reps_extra.tolist())
+    x_lab = X_reps_extra.copy()
+    y_lab = y_reps_extra.copy()
+    rng = np.random.default_rng(SEMILLA + (0 if metodo == "activo" else 100))
+    registros = []
+    for ronda in range(REPETICIONES_ACTIVO):
+        clasificador, exactitud = entrenar_y_evaluar(x_lab, y_lab)
+        registros.append({"etiquetas": len(y_lab), "exactitud": exactitud, "ronda": ronda})
+        disponibles = [i for i in range(len(X_pool_esc)) if i not in indices_lab]
+        if not disponibles:
+            break
+        if metodo == "activo":
+            elegidos, predicciones, confianzas, margenes = seleccionar_inciertos(
+                clasificador, X_pool_esc, disponibles, N_ACTIVO, rng
+            )
+        else:
+            elegidos = np.asarray(
+                rng.choice(disponibles, size=min(N_ACTIVO, len(disponibles)), replace=False)
+            )
+            probabilidades = clasificador.predict_proba(X_pool_esc[elegidos])
+            predicciones = clasificador.classes_[np.argmax(probabilidades, axis=1)]
+            confianzas = probabilidades.max(axis=1)
+            margenes = np.zeros(len(elegidos), dtype=float)
+        df_ronda = construir_df_ronda(elegidos, predicciones, confianzas, margenes)
+        if MODO_PRUEBA:
+            df_ronda["clase"] = [
+                f"grupo_{int(etiquetas_cluster[i])}" for i in df_ronda["indice"]
+            ]
+            guardar_etiquetas(df_ronda, ruta_etiquetas)
+        else:
+            display(df_ronda)
+            df_ronda = etiquetar_lote_prompt(
+                df_ronda,
+                ruta_etiquetas,
+                "indice",
+                f"{titulo} ronda {ronda + 1}",
+                CLASES,
+                columnas_extra=["prediccion", "confianza", "margen"],
+            )
+        df_ronda = cargar_etiquetas(ruta_etiquetas, df_ronda, "indice")
+        mascara = ~df_ronda["clase"].astype(str).str.strip().isin(["", "dudoso"])
+        nuevos = df_ronda.loc[mascara]
+        if len(nuevos):
+            x_lab = np.vstack([x_lab, X_pool_esc[nuevos["indice"].to_numpy(dtype=int)]])
+            y_lab = np.concatenate([y_lab, nuevos["clase"].to_numpy(dtype=object)])
+            indices_lab.update(nuevos["indice"].tolist())
+    clasificador, exactitud = entrenar_y_evaluar(x_lab, y_lab)
+    registros.append({"etiquetas": len(y_lab), "exactitud": exactitud, "ronda": REPETICIONES_ACTIVO})
+    return clasificador, pd.DataFrame(registros)
+
+
+clf_activo, registros_activo = ejecutar_metodo(
+    "activo", ETIQUETAS_ACTIVO, "Activo"
+)
+clf_aleatorio, registros_aleatorio = ejecutar_metodo(
+    "aleatorio", ETIQUETAS_ALEATORIO, "Aleatorio"
+)
+
+fig, ax = plt.subplots(figsize=(9, 4.8))
+ax.plot(
+    registros_activo["etiquetas"],
+    registros_activo["exactitud"],
+    "o-",
+    label="activo (margin sampling)",
+    color="#c44e52",
+)
+ax.plot(
+    registros_aleatorio["etiquetas"],
+    registros_aleatorio["exactitud"],
+    "s--",
+    label="aleatorio",
+    color="#4c72b0",
+)
+ax.set_xlabel("Número de etiquetas fuertes")
+ax.set_ylabel("Exactitud en prueba")
+ax.set_title("Curva de aprendizaje: activo vs aleatorio")
+ax.legend()
+plt.tight_layout()
+guardar_fig(FIGURAS / "p1_curva_activo.png")
+plt.show()
+plt.close("all")
+
+y_pred_activo = clf_activo.predict(X_test_etq)
+graficar_confusion(
+    y_test_etq,
+    y_pred_activo,
+    clases_eval,
+    FIGURAS / "p1_matriz_confusion_activo.png",
+    "Matriz de confusión del modelo activo",
+)
+graficar_distribucion_clases(
+    y_test_etq,
+    y_pred_activo,
+    clases_eval,
+    FIGURAS / "p1_distribucion_clases_activo.png",
+    "Distribución real vs predicha (activo)",
+)
+plt.show()
+plt.close("all")
+
+metricas_activo = calcular_metricas(
+    "activo", clf_activo, X_test_etq, y_test_etq, clases_eval
+)
+metricas_aleatorio = calcular_metricas(
+    "aleatorio", clf_aleatorio, X_test_etq, y_test_etq, clases_eval
+)
+df_metricas_final = pd.DataFrame(metricas + [metricas_activo, metricas_aleatorio])
+df_metricas_final.to_csv(
+    SALIDA / "metricas_modelos.csv", index=False, encoding="utf-8"
+)
+print(df_metricas_final.to_string(index=False))
 
 # %%
 resumen = {
@@ -1519,45 +1812,19 @@ resumen = {
     "imagenes_test": int(len(df_test)),
     "parches_pool": int(len(X_pool)),
     "parches_test": int(len(X_test)),
-    "parches_test_etiquetados": int(len(y_test_etq)),
+    "caracteristicas_por_parche": int(X_pool.shape[1]),
     "tam_parche": int(TAM_PARCHE),
-    "canales": "escala_de_grises",
-    "clases": [str(clase) for clase in clases],
-    "k": int(k),
-    "k_criterio": "silueta",
+    "k_codo": int(k_codo),
+    "k_elegido": int(k_elegido),
     "silueta_pool": float(silueta_pool),
-    "n_inciertas": int(n_inciertas),
+    "clases": [str(clase) for clase in sorted(set(clases_eval) | set(CLASES))],
+    "parches_test_etiquetados": int(len(y_test_etq)),
+    "etiquetas_fuertes": int(len(y_reps_extra)),
+    "metricas": df_metricas_final.to_dict(orient="records"),
     "representantes": df_reps.to_dict(orient="records"),
-    "metricas": metricas,
 }
 with open(SALIDA / "resumen.json", "w", encoding="utf-8") as archivo:
     json.dump(resumen, archivo, indent=2, ensure_ascii=False, default=str)
 
 print("Resumen guardado en:", SALIDA / "resumen.json")
 print(json.dumps(resumen, indent=2, ensure_ascii=False, default=str))
-
-# %% [markdown]
-# ## Lectura de resultados
-#
-# - El **codo** se lee en la curva de inercia; el `k` se elige por el **maximo
-#   de silueta** (`argmax`), no por el codo.
-# - La **verificacion 64x64** se ve en la seccion 4: cada parche se aplana a
-#   `64 * 64 = 4096` valores, y las figuras de parches muestran imagenes de
-#   `64 x 64` pixeles recortadas de las fotos originales.
-# - El **etiquetado de representantes** reemplaza el etiquetado manual de todas
-#   las imagenes: se etiqueta un parche por cluster y se propaga la clase.
-# - La **propagacion semi-supervisada** entrena con todos los parches del cluster,
-#   no solo con el representante.
-# - El **aprendizaje activo** selecciona los parches de menor confianza con
-#   `predict_proba` y entrena un clasificador usando unicamente esas muestras.
-# - La **matriz de confusion** muestra que clases se confunden.
-#
-# ## Como ejecutar
-#
-# 1. Ejecutar las celdas hasta la de etiquetado de representantes.
-# 2. Etiquetar cada representante con una clase y pulsar **Guardar CSV**.
-# 3. Ejecutar la celda de carga de representantes y la del conjunto de prueba.
-# 4. Etiquetar los parches de prueba y pulsar **Guardar CSV**.
-# 5. Ejecutar el resto de las celdas para obtener las metricas y las figuras.
-
-# %%
