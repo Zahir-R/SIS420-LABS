@@ -4,3 +4,6 @@ muro
 roca
 terreno
 vegetacion
+vegetacion_sombra
+rama
+vegetaion

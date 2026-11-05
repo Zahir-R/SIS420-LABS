@@ -103,7 +103,6 @@ CLASES_BASE = ["agua", "basura", "muro", "roca", "terreno", "vegetacion"]
 CLASES = list(CLASES_BASE)
 
 if MODO_PRUEBA:
-    SALIDA = Path("/tmp/opencode/resultados_p1_prueba")
     MAX_IMAGENES = 24
     PARCHES_POR_IMAGEN = 4
     K_MAX = 5
