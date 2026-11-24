@@ -1,0 +1,17 @@
+{
+  "level": "level04",
+  "level_name": "Nivel 4 - Cruce",
+  "state_schema": "x,y,stun,time_bucket,threat,threat_distance",
+  "actions": [
+    "left",
+    "right",
+    "jump",
+    "wait",
+    "jump_left",
+    "jump_right"
+  ],
+  "policies": {
+    "bellman": "bellman.json",
+    "qlearning": "qlearning.json"
+  }
+}

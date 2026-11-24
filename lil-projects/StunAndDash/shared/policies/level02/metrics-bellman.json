@@ -1,0 +1,127 @@
+{
+  "algorithm": "bellman",
+  "iterations": 30,
+  "convergence": [
+    {
+      "iteration": 1,
+      "delta": 100.0
+    },
+    {
+      "iteration": 2,
+      "delta": 95.0
+    },
+    {
+      "iteration": 3,
+      "delta": 90.25
+    },
+    {
+      "iteration": 4,
+      "delta": 85.7375
+    },
+    {
+      "iteration": 5,
+      "delta": 77.8187009059
+    },
+    {
+      "iteration": 6,
+      "delta": 67.88642179
+    },
+    {
+      "iteration": 7,
+      "delta": 57.5501886081
+    },
+    {
+      "iteration": 8,
+      "delta": 52.2404577103
+    },
+    {
+      "iteration": 9,
+      "delta": 45.58262907
+    },
+    {
+      "iteration": 10,
+      "delta": 39.7767775929
+    },
+    {
+      "iteration": 11,
+      "delta": 34.7136758803
+    },
+    {
+      "iteration": 12,
+      "delta": 30.2980995141
+    },
+    {
+      "iteration": 13,
+      "delta": 26.4470300667
+    },
+    {
+      "iteration": 14,
+      "delta": 23.0880900266
+    },
+    {
+      "iteration": 15,
+      "delta": 20.5733502606
+    },
+    {
+      "iteration": 16,
+      "delta": 18.6810262767
+    },
+    {
+      "iteration": 17,
+      "delta": 16.9630825845
+    },
+    {
+      "iteration": 18,
+      "delta": 15.4033208859
+    },
+    {
+      "iteration": 19,
+      "delta": 14.1054498325
+    },
+    {
+      "iteration": 20,
+      "delta": 13.3929137519
+    },
+    {
+      "iteration": 21,
+      "delta": 12.6908924521
+    },
+    {
+      "iteration": 22,
+      "delta": 6.8383336595
+    },
+    {
+      "iteration": 23,
+      "delta": 2.6272658122
+    },
+    {
+      "iteration": 24,
+      "delta": 0.8064323481
+    },
+    {
+      "iteration": 25,
+      "delta": 0.2102934054
+    },
+    {
+      "iteration": 26,
+      "delta": 0.0483994262
+    },
+    {
+      "iteration": 27,
+      "delta": 0.0100878608
+    },
+    {
+      "iteration": 28,
+      "delta": 0.0019395539
+    },
+    {
+      "iteration": 29,
+      "delta": 0.0003487454
+    },
+    {
+      "iteration": 30,
+      "delta": 5.92652e-05
+    }
+  ],
+  "states": 67221
+}

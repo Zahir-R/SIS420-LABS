@@ -1,0 +1,12 @@
+{
+  "algorithm": "qlearning",
+  "episodes": 4000,
+  "alpha": 0.15,
+  "gamma": 0.95,
+  "epsilon_end": 0.05,
+  "mean_return": 96.86725,
+  "best_return": 116.0,
+  "last_return": 104.0,
+  "win_rate": 0.9555,
+  "states_seen": 5286
+}
