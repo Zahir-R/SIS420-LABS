@@ -10,11 +10,12 @@ def test_reset_and_step() -> None:
     level = Level.from_json(ROOT / "shared/levels/level01.json")
     env = StunDashEnv(level, seed=7)
     state = env.reset(seed=7)
-    assert state.key() == "7,1,0,7,0"
+    assert state.key() == "7,1,0,7,0,0"
     next_state, _, _, _ = env.step(1)
     assert next_state.x >= state.x
     assert 0 <= next_state.time_bucket <= 7
     assert 0 <= next_state.threat <= 10
+    assert 0 <= next_state.threat_distance <= 2
 
 
 def test_actions_exist() -> None:

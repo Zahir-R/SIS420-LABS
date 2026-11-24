@@ -14,10 +14,10 @@ FIRE_SAME = 8
 FIRE_ABOVE = 9
 FIRE_BELOW = 10
 
-TRAP_CODES = (TRAP_LEFT, TRAP_RIGHT, TRAP_SAME, TRAP_ABOVE, TRAP_BELOW)
-FIRE_CODES = (FIRE_LEFT, FIRE_RIGHT, FIRE_SAME, FIRE_ABOVE, FIRE_BELOW)
+THREAT_DISTANCES = (0, 1, 2)
+DISTANCE_PROBABILITIES = (0.25, 0.5, 0.25)
 
-DISTRIBUTION = (
+THREAT_DISTRIBUTION = (
     (THREAT_NONE, 0.50),
     (TRAP_LEFT, 0.06),
     (TRAP_RIGHT, 0.06),
@@ -32,22 +32,36 @@ DISTRIBUTION = (
 )
 
 
-def sample_threat(rng: random.Random) -> int:
+def sample_threat(rng: random.Random) -> tuple[int, int]:
     roll = rng.random()
     cumulative = 0.0
-    for code, probability in DISTRIBUTION:
+    code = THREAT_NONE
+    for candidate, probability in THREAT_DISTRIBUTION:
         cumulative += probability
         if roll <= cumulative:
-            return code
-    return THREAT_NONE
+            code = candidate
+            break
+    if code == THREAT_NONE:
+        return code, 0
+    distance = rng.choices(THREAT_DISTANCES, weights=DISTANCE_PROBABILITIES, k=1)[0]
+    return code, distance
 
 
-def successors() -> tuple[tuple[int, float], ...]:
-    return DISTRIBUTION
+def successors() -> tuple[tuple[int, int, float], ...]:
+    result: list[tuple[int, int, float]] = []
+    for code, code_probability in THREAT_DISTRIBUTION:
+        if code == THREAT_NONE:
+            result.append((code, 0, code_probability))
+            continue
+        for distance, distance_probability in zip(
+            THREAT_DISTANCES, DISTANCE_PROBABILITIES
+        ):
+            result.append((code, distance, code_probability * distance_probability))
+    return tuple(result)
 
 
-def hazard_hit(threat: int, action: int) -> bool:
-    if threat == THREAT_NONE:
+def hazard_hit(threat: int, distance: int, action: int) -> bool:
+    if threat == THREAT_NONE or distance > 1:
         return False
     if threat == TRAP_LEFT:
         return action in (0, 4)

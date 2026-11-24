@@ -1,6 +1,6 @@
 {
   "algorithm": "bellman",
-  "iterations": 32,
+  "iterations": 30,
   "convergence": [
     {
       "iteration": 1,
@@ -20,116 +20,108 @@
     },
     {
       "iteration": 5,
-      "delta": 76.60659343
+      "delta": 77.8187009059
     },
     {
       "iteration": 6,
-      "delta": 64.8448404649
+      "delta": 67.88642179
     },
     {
       "iteration": 7,
-      "delta": 52.7613143043
+      "delta": 57.5501886081
     },
     {
       "iteration": 8,
-      "delta": 47.1514396197
+      "delta": 52.2404577103
     },
     {
       "iteration": 9,
-      "delta": 39.9278254536
+      "delta": 45.58262907
     },
     {
       "iteration": 10,
-      "delta": 33.8165803178
+      "delta": 39.7767775929
     },
     {
       "iteration": 11,
-      "delta": 28.6460971712
+      "delta": 34.7136758803
     },
     {
       "iteration": 12,
-      "delta": 24.2712539172
+      "delta": 30.2980995141
     },
     {
       "iteration": 13,
-      "delta": 20.5693219657
+      "delta": 26.4470300667
     },
     {
       "iteration": 14,
-      "delta": 17.948101386
+      "delta": 23.0880900266
     },
     {
       "iteration": 15,
-      "delta": 16.9967964875
+      "delta": 20.5733502606
     },
     {
       "iteration": 16,
-      "delta": 15.9319599271
+      "delta": 18.6810262767
     },
     {
       "iteration": 17,
-      "delta": 14.9999424716
+      "delta": 16.9630825845
     },
     {
       "iteration": 18,
-      "delta": 14.0855997768
+      "delta": 15.4033208859
     },
     {
       "iteration": 19,
-      "delta": 13.1956452612
+      "delta": 14.1054498325
     },
     {
       "iteration": 20,
-      "delta": 12.3351476116
+      "delta": 13.3929137519
     },
     {
       "iteration": 21,
-      "delta": 11.5078089367
+      "delta": 12.6908924521
     },
     {
       "iteration": 22,
-      "delta": 8.2559705175
+      "delta": 6.8383336595
     },
     {
       "iteration": 23,
-      "delta": 4.2267817804
+      "delta": 2.6272658122
     },
     {
       "iteration": 24,
-      "delta": 1.7293513691
+      "delta": 0.8064323481
     },
     {
       "iteration": 25,
-      "delta": 0.6011772287
+      "delta": 0.2102934054
     },
     {
       "iteration": 26,
-      "delta": 0.1844611643
+      "delta": 0.0483994262
     },
     {
       "iteration": 27,
-      "delta": 0.0512585734
+      "delta": 0.0100878608
     },
     {
       "iteration": 28,
-      "delta": 0.0131395671
+      "delta": 0.0019395539
     },
     {
       "iteration": 29,
-      "delta": 0.0031499624
+      "delta": 0.0003487454
     },
     {
       "iteration": 30,
-      "delta": 0.0007137036
-    },
-    {
-      "iteration": 31,
-      "delta": 0.0001541075
-    },
-    {
-      "iteration": 32,
-      "delta": 3.1924e-05
+      "delta": 5.92652e-05
     }
   ],
-  "states": 22407
+  "states": 67221
 }

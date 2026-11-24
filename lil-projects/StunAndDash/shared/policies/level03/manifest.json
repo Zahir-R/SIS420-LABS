@@ -1,7 +1,7 @@
 {
   "level": "level03",
-  "level_name": "Nivel 3 - variante",
-  "state_schema": "x,y,stun,time_bucket,threat",
+  "level_name": "Nivel 3 - Descenso",
+  "state_schema": "x,y,stun,time_bucket,threat,threat_distance",
   "actions": [
     "left",
     "right",

@@ -1,7 +1,7 @@
 {
   "level": "level02",
-  "level_name": "Nivel 2 - variante",
-  "state_schema": "x,y,stun,time_bucket,threat",
+  "level_name": "Nivel 2 - Corredor alto",
+  "state_schema": "x,y,stun,time_bucket,threat,threat_distance",
   "actions": [
     "left",
     "right",

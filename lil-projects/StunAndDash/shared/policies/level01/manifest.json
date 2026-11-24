@@ -1,7 +1,7 @@
 {
   "level": "level01",
   "level_name": "Pasarela",
-  "state_schema": "x,y,stun,time_bucket,threat",
+  "state_schema": "x,y,stun,time_bucket,threat,threat_distance",
   "actions": [
     "left",
     "right",

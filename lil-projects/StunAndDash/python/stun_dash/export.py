@@ -9,7 +9,7 @@ from .level import Level
 from .qlearning import QLearningResult
 
 ACTION_NAMES = list(ACTIONS)
-STATE_SCHEMA = "x,y,stun,time_bucket,threat"
+STATE_SCHEMA = "x,y,stun,time_bucket,threat,threat_distance"
 
 
 def export_bellman(

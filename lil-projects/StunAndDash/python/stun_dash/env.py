@@ -20,9 +20,13 @@ class State:
     stun: int
     time_bucket: int
     threat: int
+    threat_distance: int
 
     def key(self) -> str:
-        return f"{self.x},{self.y},{self.stun},{self.time_bucket},{self.threat}"
+        return (
+            f"{self.x},{self.y},{self.stun},{self.time_bucket},"
+            f"{self.threat},{self.threat_distance}"
+        )
 
 
 class StunDashEnv:
@@ -35,7 +39,7 @@ class StunDashEnv:
 
     def _start_state(self) -> State:
         x, y = self.level.agent_start
-        return State(x, y, 0, TIME_BUCKETS - 1, adversary.THREAT_NONE)
+        return State(x, y, 0, TIME_BUCKETS - 1, adversary.THREAT_NONE, 0)
 
     def reset(self, seed: int | None = None) -> State:
         if seed is not None:
@@ -60,8 +64,10 @@ class StunDashEnv:
                 self.state = replace(previous, x=x, y=y)
                 self.done = True
                 return self.state, 100.0, True, {"events": ["goal"]}
-            hit = adversary.hazard_hit(previous.threat, action)
-            new_threat = adversary.sample_threat(self.rng)
+            hit = adversary.hazard_hit(
+                previous.threat, previous.threat_distance, action
+            )
+            new_threat, new_distance = adversary.sample_threat(self.rng)
             stun = STUN_TICKS if hit else 0
             reward = -1.0
             if x > previous.x:
@@ -71,7 +77,7 @@ class StunDashEnv:
             if hit:
                 reward -= 8.0
                 events.append("threat_hit")
-            moved = State(x, y, stun, previous.time_bucket, new_threat)
+            moved = State(x, y, stun, previous.time_bucket, new_threat, new_distance)
 
         time_bucket = moved.time_bucket
         if time_bucket > 0 and self.rng.random() < TIME_DECAY_PROBABILITY:
@@ -102,11 +108,11 @@ class StunDashEnv:
             base_reward += 2.0
         elif x < state.x:
             base_reward -= 1.0
-        hit = adversary.hazard_hit(state.threat, action)
-        for new_threat, probability in adversary.successors():
+        hit = adversary.hazard_hit(state.threat, state.threat_distance, action)
+        for new_threat, new_distance, probability in adversary.successors():
             stun = STUN_TICKS if hit else 0
             reward = base_reward - (8.0 if hit else 0.0)
-            next_state = State(x, y, stun, state.time_bucket, new_threat)
+            next_state = State(x, y, stun, state.time_bucket, new_threat, new_distance)
             for (
                 candidate,
                 candidate_reward,
@@ -215,5 +221,15 @@ class StunDashEnv:
                 for stun in range(STUN_TICKS + 1):
                     for time_bucket in range(TIME_BUCKETS):
                         for threat in range(11):
-                            states.append(State(x, y, stun, time_bucket, threat))
+                            for threat_distance in range(3):
+                                states.append(
+                                    State(
+                                        x,
+                                        y,
+                                        stun,
+                                        time_bucket,
+                                        threat,
+                                        threat_distance,
+                                    )
+                                )
         return states
