@@ -19,10 +19,10 @@ class State:
     y: int
     stun: int
     time_bucket: int
-    danger: int
+    threat: int
 
     def key(self) -> str:
-        return f"{self.x},{self.y},{self.stun},{self.time_bucket},{self.danger}"
+        return f"{self.x},{self.y},{self.stun},{self.time_bucket},{self.threat}"
 
 
 class StunDashEnv:
@@ -35,7 +35,7 @@ class StunDashEnv:
 
     def _start_state(self) -> State:
         x, y = self.level.agent_start
-        return State(x, y, 0, TIME_BUCKETS - 1, adversary.DANGER_NONE)
+        return State(x, y, 0, TIME_BUCKETS - 1, adversary.THREAT_NONE)
 
     def reset(self, seed: int | None = None) -> State:
         if seed is not None:
@@ -60,7 +60,8 @@ class StunDashEnv:
                 self.state = replace(previous, x=x, y=y)
                 self.done = True
                 return self.state, 100.0, True, {"events": ["goal"]}
-            danger, hit = adversary.sample(self.rng)
+            hit = adversary.hazard_hit(previous.threat, action)
+            new_threat = adversary.sample_threat(self.rng)
             stun = STUN_TICKS if hit else 0
             reward = -1.0
             if x > previous.x:
@@ -69,10 +70,8 @@ class StunDashEnv:
                 reward -= 1.0
             if hit:
                 reward -= 8.0
-                events.append(
-                    "trap_hit" if danger == adversary.DANGER_TRAP else "fire_hit"
-                )
-            moved = State(x, y, stun, previous.time_bucket, danger)
+                events.append("threat_hit")
+            moved = State(x, y, stun, previous.time_bucket, new_threat)
 
         time_bucket = moved.time_bucket
         if time_bucket > 0 and self.rng.random() < TIME_DECAY_PROBABILITY:
@@ -103,10 +102,11 @@ class StunDashEnv:
             base_reward += 2.0
         elif x < state.x:
             base_reward -= 1.0
-        for danger, hit, probability in adversary.outcomes():
+        hit = adversary.hazard_hit(state.threat, action)
+        for new_threat, probability in adversary.successors():
             stun = STUN_TICKS if hit else 0
             reward = base_reward - (8.0 if hit else 0.0)
-            next_state = State(x, y, stun, state.time_bucket, danger)
+            next_state = State(x, y, stun, state.time_bucket, new_threat)
             for (
                 candidate,
                 candidate_reward,
@@ -214,6 +214,6 @@ class StunDashEnv:
                     continue
                 for stun in range(STUN_TICKS + 1):
                     for time_bucket in range(TIME_BUCKETS):
-                        for danger in range(3):
-                            states.append(State(x, y, stun, time_bucket, danger))
+                        for threat in range(11):
+                            states.append(State(x, y, stun, time_bucket, threat))
         return states

@@ -1,7 +1,5 @@
 import Phaser from "phaser";
 import { PolicyRunner, type PolicyData, type PolicyMode } from "../ai/PolicyRunner";
-import { RouteEvaluator } from "../ai/RouteEvaluator";
-import { TemporalPlanner } from "../ai/TemporalPlanner";
 import { Projectile } from "../entities/Projectile";
 import { SaboteurController, type SaboteurKeys } from "../entities/SaboteurController";
 import {
@@ -19,12 +17,23 @@ interface Trap {
   active: boolean;
 }
 
+const THREAT_NONE = 0;
+const TRAP_LEFT = 1;
+const TRAP_RIGHT = 2;
+const TRAP_SAME = 3;
+const TRAP_ABOVE = 4;
+const TRAP_BELOW = 5;
+const FIRE_LEFT = 6;
+const FIRE_RIGHT = 7;
+const FIRE_SAME = 8;
+const FIRE_ABOVE = 9;
+const FIRE_BELOW = 10;
+
 export class PlayScene extends Phaser.Scene {
   private mode: PolicyMode = "bellman";
+  private levelId = "level01";
   private level!: LevelData;
   private policy!: PolicyRunner;
-  private planner = new TemporalPlanner();
-  private routeEvaluator = new RouteEvaluator(this.planner);
   private agent!: Phaser.GameObjects.Sprite;
   private saboteur!: SaboteurController;
   private keys!: SaboteurKeys;
@@ -32,33 +41,31 @@ export class PlayScene extends Phaser.Scene {
   private agentY = 0;
   private remaining = 0;
   private stunTicks = 0;
-  private danger = 0;
+  private threat = THREAT_NONE;
   private traps: Trap[] = [];
   private projectiles: Projectile[] = [];
   private trapsLeft = 2;
   private fireballsLeft = 2;
   private trapCooldown = 0;
   private fireCooldown = 0;
-  private stallRun = 0;
-  private forcedActions: number[] = [];
   private gameOver = false;
   private ticker!: Phaser.Time.TimerEvent;
   private hud!: Phaser.GameObjects.Text;
   private message!: Phaser.GameObjects.Text;
   private trapButton!: Phaser.GameObjects.Text;
   private fireButton!: Phaser.GameObjects.Text;
-  private sessionTimer = 0;
 
   constructor() {
     super("Play");
   }
 
-  init(data: { mode?: PolicyMode }): void {
+  init(data: { mode?: PolicyMode; level?: string }): void {
     this.mode = data.mode ?? "bellman";
+    this.levelId = data.level ?? "level01";
   }
 
   create(): void {
-    const rawLevel = this.cache.json.get("level") as LevelData;
+    const rawLevel = this.cache.json.get(this.levelId) as LevelData;
     try {
       this.level = normalizeLevel(rawLevel);
     } catch (error) {
@@ -75,24 +82,21 @@ export class PlayScene extends Phaser.Scene {
         .setDepth(100);
       return;
     }
-    const bellman = this.cache.json.get("bellman") as PolicyData;
-    const qlearning = this.cache.json.get("qlearning") as PolicyData;
+    const bellman = this.cache.json.get(`bellman-${this.levelId}`) as PolicyData;
+    const qlearning = this.cache.json.get(`qlearning-${this.levelId}`) as PolicyData;
     this.policy = new PolicyRunner(this.mode, bellman, qlearning);
     this.agentX = this.level.agent_start[0];
     this.agentY = this.level.agent_start[1];
     this.remaining = this.level.time_limit_s;
     this.stunTicks = 0;
-    this.danger = 0;
+    this.threat = THREAT_NONE;
     this.traps = [];
     this.projectiles = [];
-    this.trapsLeft = 10;
-    this.fireballsLeft = 10;
+    this.trapsLeft = 2;
+    this.fireballsLeft = 2;
     this.trapCooldown = 0;
     this.fireCooldown = 0;
-    this.stallRun = 0;
-    this.forcedActions = [];
     this.gameOver = false;
-    this.sessionTimer = 0;
 
     this.add
       .tileSprite(0, 0, 960, 540, "background")
@@ -116,7 +120,6 @@ export class PlayScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     if (this.gameOver) return;
-    this.sessionTimer += deltaMs;
     this.saboteur.update(deltaMs, this.keys, this.level);
     this.updateCamera();
 
@@ -236,7 +239,7 @@ export class PlayScene extends Phaser.Scene {
     const trap: Trap = { x, y, sprite, active: true };
     this.traps.push(trap);
     this.trapsLeft -= 1;
-    this.trapCooldown = 0.4;
+    this.trapCooldown = 1.4;
     this.time.delayedCall(7000, () => {
       trap.active = false;
       sprite.destroy();
@@ -247,13 +250,11 @@ export class PlayScene extends Phaser.Scene {
 
   private fire(): void {
     if (this.fireballsLeft <= 0 || this.fireCooldown > 0 || this.gameOver) return;
-    this.fireballsLeft -= 0;
-    this.fireCooldown = 0.01;
+    this.fireballsLeft -= 1;
+    this.fireCooldown = 1.4;
     const pointer = this.input.activePointer;
     const direction = pointer.worldX >= this.saboteur.x ? 1 : -1;
-    this.projectiles.push(
-      new Projectile(this, this.saboteur.x, this.saboteur.y, direction),
-    );
+    this.projectiles.push(new Projectile(this, this.saboteur.x, this.saboteur.y, direction));
     this.updateHud();
   }
 
@@ -267,23 +268,15 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    this.danger = this.computeDanger();
+    this.threat = this.computeThreat();
     if (this.stunTicks > 0) {
       this.stunTicks -= 1;
       this.updateHud();
       return;
     }
 
-    const [chosenAction, planLabel] = this.chooseAction();
-    let action = chosenAction;
-    let path = movePath(this.level, this.agentX, this.agentY, action);
-    let stalled = path.final[0] === this.agentX && path.final[1] === this.agentY;
-    if (stalled && this.stallRun >= 4) {
-      action = this.escapeAction();
-      path = movePath(this.level, this.agentX, this.agentY, action);
-      stalled = path.final[0] === this.agentX && path.final[1] === this.agentY;
-    }
-    this.stallRun = stalled ? this.stallRun + 1 : 0;
+    const [action, planLabel] = this.chooseAction();
+    const path = movePath(this.level, this.agentX, this.agentY, action);
     const changed = path.final[0] !== this.agentX || path.final[1] !== this.agentY;
     const hitIndex = path.cells.findIndex(([x, y]) =>
       this.traps.some((trap) => trap.active && trap.x === x && trap.y === y),
@@ -292,11 +285,20 @@ export class PlayScene extends Phaser.Scene {
     const destination = hitIndex >= 0 ? path.cells[hitIndex] : path.final;
     this.agentX = destination[0];
     this.agentY = destination[1];
-    this.agent.play(action === 2 || action === 4 || action === 5 ? "vg-jump" : changed ? "vg-run" : "vg-idle");
+    this.agent.play(
+      action === 2 || action === 4 || action === 5
+        ? "vg-jump"
+        : changed
+          ? "vg-run"
+          : "vg-idle",
+    );
     this.animatePath(visiblePath);
     if (hitIndex >= 0) {
       const trap = this.traps.find(
-        (candidate) => candidate.active && candidate.x === destination[0] && candidate.y === destination[1],
+        (candidate) =>
+          candidate.active &&
+          candidate.x === destination[0] &&
+          candidate.y === destination[1],
       );
       if (trap) {
         trap.active = false;
@@ -309,16 +311,9 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
     this.message.setText(planLabel);
-    this.message.setVisible(true);
-    this.time.delayedCall(700, () => {
-      if (!this.gameOver) {
-        this.message.setText("");
-        this.message.setVisible(false);
-      }
-    });
+    this.message.setVisible(false);
     this.updateHud();
   }
-
 
   private animatePath(cells: Array<[number, number]>): void {
     if (cells.length === 0) return;
@@ -343,139 +338,44 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private chooseAction(): [number, string] {
-    const activeTraps = this.traps.filter((trap) => trap.active);
-    const activeProjectiles = this.projectiles.filter((projectile) => projectile.active);
-
-    if (this.forcedActions.length > 0) {
-      const next = this.forcedActions[0];
-      if (this.isSafeAction(next, activeTraps, activeProjectiles)) {
-        this.forcedActions.shift();
-        return [next, "FORCED DETOUR"];
-      }
-      this.forcedActions = [];
-      const rebuilt = this.findForcedDetour(activeTraps, activeProjectiles);
-      if (rebuilt && rebuilt.length > 0) {
-        this.forcedActions = rebuilt.slice(1);
-        return [rebuilt[0], "FORCED DETOUR"];
-      }
-      return [this.escapeAction(), "FORCED HIT"];
-    }
-
-    if (this.stallRun >= 4) {
-      const forced = this.findForcedDetour(activeTraps, activeProjectiles);
-      if (forced && forced.length > 0) {
-        this.forcedActions = forced.slice(1);
-        return [forced[0], "FORCED DETOUR"];
-      }
-      return [this.escapeAction(), "FORCED HIT"];
-    }
-
-    if (activeTraps.length > 0 || activeProjectiles.length > 0) {
-      const trapCells: Array<[number, number]> = activeTraps.map((trap) => [trap.x, trap.y]);
-      const decision = this.routeEvaluator.evaluate(
-        this.level,
-        this.agentX,
-        this.agentY,
-        this.remaining,
-        trapCells,
-        activeProjectiles,
-        (key) => this.policy.choose(key),
-      );
-      if (decision) {
-        if (decision.mode === "detour" && decision.detourActions.length > 1) {
-          this.forcedActions = decision.detourActions.slice(1);
-        }
-        const returnLabel =
-          decision.mode === "detour"
-            ? `DETOUR  Q=${this.formatReturn(decision.detourReturn)} vs ${this.formatReturn(decision.policyReturn)}`
-            : `POLICY  Q=${this.formatReturn(decision.policyReturn)} vs ${this.formatReturn(decision.detourReturn)}`;
-        return [decision.action, returnLabel];
-      }
-      return [this.escapeAction(), "NO ROUTE"];
-    }
-
     const timeBucket = Math.min(
       7,
       Math.max(0, Math.floor((this.remaining / this.level.time_limit_s) * 7)),
     );
-    const key = `${this.agentX},${this.agentY},${this.stunTicks},${timeBucket},${this.danger}`;
+    const key = `${this.agentX},${this.agentY},${this.stunTicks},${timeBucket},${this.threat}`;
     return [this.policy.choose(key), "POLICY"];
   }
 
-  private findForcedDetour(
-    activeTraps: Trap[],
-    activeProjectiles: Projectile[],
-  ): number[] | null {
-    const trapCells: Array<[number, number]> = activeTraps.map((trap) => [trap.x, trap.y]);
-    const projectileCells = activeProjectiles.flatMap((projectile) =>
-      projectile.predictCells(this.level, this.level.tick_ms, 36),
-    );
-    const safe = this.planner.findSafeNoStall(
-      this.level,
-      this.agentX,
-      this.agentY,
-      trapCells,
-      projectileCells,
-      36,
-    );
-    return safe && safe.actions.length > 0 ? safe.actions : null;
-  }
-
-  private isSafeAction(
-    action: number,
-    activeTraps: Trap[],
-    activeProjectiles: Projectile[],
-  ): boolean {
-    const path = movePath(this.level, this.agentX, this.agentY, action);
-    if (path.final[0] === this.agentX && path.final[1] === this.agentY) {
-      return false;
-    }
-    const cells: Array<[number, number]> = [[this.agentX, this.agentY], ...path.cells];
-    if (
-      activeTraps.some((trap) =>
-        cells.some(([x, y]) => trap.x === x && trap.y === y),
-      )
-    ) {
-      return false;
-    }
-    const nextProjectileCells = activeProjectiles.flatMap((projectile) =>
-      projectile.predictCells(this.level, this.level.tick_ms, 1),
-    );
-    return !nextProjectileCells.some(([x, y]) =>
-      cells.some(([cx, cy]) => cx === x && cy === y),
-    );
-  }
-
-  private formatReturn(value: number): string {
-    return Number.isFinite(value) ? value.toFixed(1) : "—";
-  }
-
-  private computeDanger(): number {
-    if (
-      this.projectiles.some(
-        (projectile) =>
-          projectile.active &&
-          projectile.cellY === this.agentY &&
-          Math.abs(projectile.cellX - this.agentX) <= 2,
-      )
-    ) {
-      return 2;
-    }
-    const trapNear = this.traps.some(
-      (trap) => trap.active && trap.y === this.agentY && Math.abs(trap.x - this.agentX) <= 1,
-    );
-    return trapNear ? 1 : 0;
-  }
-
-  private escapeAction(): number {
-    const candidates = this.level.goal[0] >= this.agentX ? [1, 5, 2, 0, 4] : [0, 4, 2, 1, 5];
-    for (const action of candidates) {
-      const path = movePath(this.level, this.agentX, this.agentY, action);
-      if (path.final[0] !== this.agentX || path.final[1] !== this.agentY) {
-        return action;
+  private computeThreat(): number {
+    const candidates: Array<{ distance: number; code: number }> = [];
+    for (const trap of this.traps) {
+      if (trap.active) {
+        const dx = trap.x - this.agentX;
+        const dy = trap.y - this.agentY;
+        candidates.push({
+          distance: Math.abs(dx) + Math.abs(dy),
+          code: this.directionCode(dx, dy, TRAP_LEFT),
+        });
       }
     }
-    return 1;
+    for (const projectile of this.projectiles) {
+      if (projectile.active) {
+        const dx = projectile.cellX - this.agentX;
+        const dy = projectile.cellY - this.agentY;
+        candidates.push({
+          distance: Math.abs(dx) + Math.abs(dy),
+          code: this.directionCode(dx, dy, FIRE_LEFT),
+        });
+      }
+    }
+    candidates.sort((a, b) => a.distance - b.distance);
+    return candidates[0]?.code ?? THREAT_NONE;
+  }
+
+  private directionCode(dx: number, dy: number, base: number): number {
+    if (dx === 0 && dy === 0) return base + 2;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx < 0 ? base : base + 1;
+    return dy < 0 ? base + 3 : base + 4;
   }
 
   private updateCamera(): void {
@@ -497,7 +397,7 @@ export class PlayScene extends Phaser.Scene {
   private triggerStun(kind: number): void {
     if (this.gameOver) return;
     this.stunTicks = 2;
-    this.danger = kind;
+    this.threat = kind === 1 ? TRAP_SAME : FIRE_SAME;
     this.agent.play("vg-hit");
     this.cameras.main.shake(120, 0.008);
     this.flash(kind === 1 ? "¡TRAMPA! STUN 0.5s" : "¡FUEGO! STUN 0.5s");
@@ -530,11 +430,18 @@ export class PlayScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
     this.add
-      .text(480, 290, agentWon ? "Llegó a la meta antes del tiempo límite." : "El agente no llegó a tiempo.", {
-        fontFamily: "monospace",
-        fontSize: "18px",
-        color: "#e8e2c8",
-      })
+      .text(
+        480,
+        290,
+        agentWon
+          ? "Llegó a la meta antes del tiempo límite."
+          : "El agente no llegó a tiempo.",
+        {
+          fontFamily: "monospace",
+          fontSize: "18px",
+          color: "#e8e2c8",
+        },
+      )
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(201);
@@ -551,7 +458,7 @@ export class PlayScene extends Phaser.Scene {
 
   private updateHud(): void {
     this.hud.setText(
-      `AGENTE ${this.mode.toUpperCase()}  T ${this.remaining.toFixed(1)}s  STUN ${this.stunTicks}  PLAN ${this.danger > 0 ? "ALERTA" : "AUTO"}`,
+      `AGENTE ${this.mode.toUpperCase()}  T ${this.remaining.toFixed(1)}s  STUN ${this.stunTicks}  THREAT ${this.threat}`,
     );
     this.trapButton.setText(`TRAMPA ${this.trapsLeft}`);
     this.fireButton.setText(`FUEGO ${this.fireballsLeft}`);

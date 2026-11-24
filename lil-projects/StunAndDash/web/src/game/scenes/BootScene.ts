@@ -50,9 +50,12 @@ export class BootScene extends Phaser.Scene {
     this.load.image("start", "/assets/start.png");
     this.load.image("goal", "/assets/goal.png");
     this.load.image("background", "/assets/background-green.png");
-    this.load.json("level", "/levels/level01.json");
-    this.load.json("bellman", "/policies/bellman.json");
-    this.load.json("qlearning", "/policies/qlearning.json");
+    const levelIds = ["level01", "level02", "level03", "level04", "level05"];
+    for (const id of levelIds) {
+      this.load.json(id, `/levels/${id}.json`);
+      this.load.json(`bellman-${id}`, `/policies/${id}/bellman.json`);
+      this.load.json(`qlearning-${id}`, `/policies/${id}/qlearning.json`);
+    }
   }
 
   create(): void {

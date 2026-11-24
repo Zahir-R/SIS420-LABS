@@ -4,9 +4,9 @@
   "alpha": 0.15,
   "gamma": 0.95,
   "epsilon_end": 0.05,
-  "mean_return": 95.81125,
+  "mean_return": 98.4995,
   "best_return": 110.0,
-  "last_return": 97.0,
-  "win_rate": 0.9875,
-  "states_seen": 907
+  "last_return": 107.0,
+  "win_rate": 0.9785,
+  "states_seen": 2950
 }

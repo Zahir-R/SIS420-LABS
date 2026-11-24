@@ -25,25 +25,24 @@ def main() -> None:
     env = StunDashEnv(level)
     if not env.is_goal_reachable():
         raise SystemExit("ERROR: la meta no es alcanzable desde S")
-    policies = ROOT / "shared/policies"
-    metrics = ROOT / "shared/metrics"
+    policies = ROOT / "shared/policies" / level.id
+    out = Path(args.out) if args.out else policies / f"{args.mode}.json"
+    metrics_path = out.parent / f"metrics-{args.mode}.json"
     if args.mode == "bellman":
         result = value_iteration(level)
-        out = Path(args.out) if args.out else policies / "bellman.json"
-        export_bellman(level, result, result.iterations, out, metrics / "bellman.json")
-        print(f"Bellman: {result.iterations} iteraciones, {len(result.policy)} estados")
+        export_bellman(level, result, result.iterations, out, metrics_path)
+        print(
+            f"Bellman {level.id}: {result.iterations} iteraciones, "
+            f"{len(result.policy)} estados"
+        )
     else:
         result = train(level, episodes=args.episodes, seed=args.seed)
-        out = Path(args.out) if args.out else policies / "qlearning.json"
-        export_qlearning(level, result, out, metrics / "qlearning.json")
-        print(f"Q-Learning: {result.metrics}")
+        export_qlearning(level, result, out, metrics_path)
+        print(f"Q-Learning {level.id}: {result.metrics}")
 
     export_manifest(
         level,
-        {
-            "bellman": "policies/bellman.json",
-            "qlearning": "policies/qlearning.json",
-        },
+        {"bellman": "bellman.json", "qlearning": "qlearning.json"},
         policies / "manifest.json",
     )
 

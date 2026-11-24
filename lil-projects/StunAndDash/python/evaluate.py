@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evalúa una política exportada")
     parser.add_argument(
-        "--policy", default=str(ROOT / "shared/policies/qlearning.json")
+        "--policy", default=str(ROOT / "shared/policies/level01/qlearning.json")
     )
     parser.add_argument("--level", default=str(ROOT / "shared/levels/level01.json"))
     parser.add_argument("--episodes", type=int, default=200)

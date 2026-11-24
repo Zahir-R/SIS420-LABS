@@ -21,4 +21,4 @@ def test_bellman_policy_and_qlearning_export(tmp_path: Path) -> None:
     export_qlearning(level, q, out, metrics)
     payload = json.loads(out.read_text(encoding="utf-8"))
     assert payload["algorithm"] == "qlearning"
-    assert payload["state_schema"] == "x,y,stun,time_bucket,danger"
+    assert payload["state_schema"] == "x,y,stun,time_bucket,threat"

@@ -14,7 +14,7 @@ def test_reset_and_step() -> None:
     next_state, _, _, _ = env.step(1)
     assert next_state.x >= state.x
     assert 0 <= next_state.time_bucket <= 7
-    assert 0 <= next_state.danger <= 2
+    assert 0 <= next_state.threat <= 10
 
 
 def test_actions_exist() -> None:

@@ -19,9 +19,11 @@ uv sync
 ## Entrenar
 
 ```sh
-uv run python python/train.py --mode bellman
-uv run python python/train.py --mode qlearning --episodes 4000 --seed 1
+make validate
+make train
 ```
+
+`make train` entrena Bellman y Q-Learning para los cinco niveles. Las políticas quedan en `shared/policies/level01/` … `level05/`.
 
 ## Web
 
@@ -53,15 +55,14 @@ http://localhost:5173/?play=random
 
 No hay editor visual todavía. Los niveles se editan en `shared/levels/level01.json`.
 
+- Hay cinco niveles en `shared/levels/level01.json` … `level05.json`.
 - `rows` debe tener `height` filas de `width` caracteres.
 - `S` define el inicio del agente y `G` la meta; `agent_start`/`goal` se derivan de esas letras.
 - `human_start` indica dónde aparece el saboteador.
 - `time_limit_s` define el cronómetro.
 - `trap_slots` y `fire_lanes` son metadatos del nivel.
 
-El planificador compara el retorno esperado de la ruta Q/Bellman contra el retorno esperado de la ruta de desvío. No elige solo por tiempo: también considera paso, stun, progreso, meta y timeout. La política se consulta en cada tick desde el estado real.
-
-Si el agente pasa 4 ticks consecutivos sin cambiar de celda, entra en **FORCED DETOUR**: trata las celdas de proyectiles como bloqueadas y busca una ruta segura sin esperas. La ruta forzada se mantiene hasta completarla; si un peligro nuevo la invalida, se recalcula. Si no existe alternativa, acepta el impacto y avanza.
+La política Q-Learning/Bellman es el único decisor. El estado incluye posición, stun, tiempo y amenaza relativa: tipo, dirección y distancia. El modo aleatorio no recibe ayuda de ningún planificador.
 
 Después de cambiar el nivel o el tiempo:
 
