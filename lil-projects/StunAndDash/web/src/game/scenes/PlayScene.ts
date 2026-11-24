@@ -44,6 +44,7 @@ export class PlayScene extends Phaser.Scene {
   private threat = THREAT_NONE;
   private threatDistance = 0;
   private stallRun = 0;
+  private detourActions: number[] = [];
   private traps: Trap[] = [];
   private projectiles: Projectile[] = [];
   private trapsLeft = 2;
@@ -100,6 +101,7 @@ export class PlayScene extends Phaser.Scene {
     this.threat = THREAT_NONE;
     this.threatDistance = 0;
     this.stallRun = 0;
+    this.detourActions = [];
     this.traps = [];
     this.projectiles = [];
     this.trapsLeft = 2;
@@ -283,15 +285,40 @@ export class PlayScene extends Phaser.Scene {
       return;
     }
 
-    const [chosenAction, planLabel] = this.chooseAction();
-    let action = chosenAction;
+    let [action, planLabel] = this.chooseAction();
     let path = movePath(this.level, this.agentX, this.agentY, action);
     let stalled = path.final[0] === this.agentX && path.final[1] === this.agentY;
-    if (stalled && this.stallRun >= 4) {
-      action = this.escapeAction();
-      path = movePath(this.level, this.agentX, this.agentY, action);
-      stalled = path.final[0] === this.agentX && path.final[1] === this.agentY;
+
+    if (this.detourActions.length > 0) {
+      const candidate = this.detourActions[0];
+      const candidatePath = movePath(this.level, this.agentX, this.agentY, candidate);
+      if (this.pathIsSafe(candidatePath)) {
+        action = candidate;
+        path = candidatePath;
+        stalled = false;
+        planLabel = "DETOUR";
+        this.detourActions.shift();
+      } else {
+        this.detourActions = [];
+      }
     }
+
+    if (this.detourActions.length === 0 && (this.pathHitsTrap(path) || (stalled && this.stallRun >= 2))) {
+      const detour = this.findDetour();
+      if (detour && detour.length > 0) {
+        action = detour[0];
+        path = movePath(this.level, this.agentX, this.agentY, action);
+        stalled = false;
+        planLabel = "DETOUR";
+        this.detourActions = detour.slice(1);
+      } else if (stalled) {
+        action = this.escapeAction();
+        path = movePath(this.level, this.agentX, this.agentY, action);
+        stalled = path.final[0] === this.agentX && path.final[1] === this.agentY;
+        planLabel = "ESCAPE";
+      }
+    }
+
     this.stallRun = stalled ? this.stallRun + 1 : 0;
     const changed = path.final[0] !== this.agentX || path.final[1] !== this.agentY;
     const hitIndex = path.cells.findIndex(([x, y]) =>
@@ -351,6 +378,59 @@ export class PlayScene extends Phaser.Scene {
       });
     };
     next();
+  }
+
+  private findDetour(): number[] | null {
+    const trapCells = new Set(
+      this.traps.filter((trap) => trap.active).map((trap) => `${trap.x},${trap.y}`),
+    );
+    const projectileCells = new Set(
+      this.projectiles
+        .filter((projectile) => projectile.active)
+        .map((projectile) => `${projectile.cellX},${projectile.cellY}`),
+    );
+    const startKey = `${this.agentX},${this.agentY}`;
+    const queue: Array<{ x: number; y: number; actions: number[] }> = [
+      { x: this.agentX, y: this.agentY, actions: [] },
+    ];
+    const seen = new Set<string>([startKey]);
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      if (node.x === this.level.goal[0] && node.y === this.level.goal[1]) {
+        return node.actions;
+      }
+      for (let action = 0; action < 6; action += 1) {
+        const path = movePath(this.level, node.x, node.y, action);
+        if (path.final[0] === node.x && path.final[1] === node.y) continue;
+        if (
+          path.cells.some(
+            ([x, y]) =>
+              trapCells.has(`${x},${y}`) || projectileCells.has(`${x},${y}`),
+          )
+        ) {
+          continue;
+        }
+        const key = `${path.final[0]},${path.final[1]}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // BFS over cells, not over time; sufficient for persistent traps.
+        if (path.final[0] === this.level.goal[0] && path.final[1] === this.level.goal[1]) {
+          return [...node.actions, action];
+        }
+        queue.push({ x: path.final[0], y: path.final[1], actions: [...node.actions, action] });
+      }
+    }
+    return null;
+  }
+
+  private pathIsSafe(path: { cells: Array<[number, number]> }): boolean {
+    return !path.cells.some(([x, y]) =>
+      this.traps.some((trap) => trap.active && trap.x === x && trap.y === y),
+    );
+  }
+
+  private pathHitsTrap(path: { cells: Array<[number, number]> }): boolean {
+    return !this.pathIsSafe(path);
   }
 
   private chooseAction(): [number, string] {

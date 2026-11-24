@@ -64,7 +64,7 @@ No hay editor visual todavía. Los niveles se editan en `shared/levels/level01.j
 
 La política Q-Learning/Bellman es el único decisor. El estado incluye posición, stun, tiempo y amenaza relativa: tipo, dirección y distancia. El modo aleatorio no recibe ayuda de ningún planificador.
 
-Las trampas son persistentes: no desaparecen por tiempo, solo cuando el agente colisiona con ellas. Si el agente pasa 4 ticks sin cambiar de celda, un guardia anti-estancamiento elige otra acción de avance; si no existe, acepta el impacto.
+Las trampas son persistentes: no desaparecen por tiempo, solo cuando el agente colisiona con ellas. Si el agente pasa 2 ticks sin cambiar de celda o su siguiente paso cruza una trampa, se calcula una ruta local de desvío y se mantiene hasta completarla o hasta que un peligro la invalide. Si no existe ruta, acepta el impacto.
 
 Bellman resuelve un modelo nominal aproximado porque las trampas pueden colocarse en cualquier celda. Q-Learning aprende de episodios muestreados con amenazas persistentes.
 
