@@ -1,0 +1,143 @@
+{
+  "algorithm": "bellman",
+  "iterations": 34,
+  "convergence": [
+    {
+      "iteration": 1,
+      "delta": 100.0
+    },
+    {
+      "iteration": 2,
+      "delta": 95.0
+    },
+    {
+      "iteration": 3,
+      "delta": 90.25
+    },
+    {
+      "iteration": 4,
+      "delta": 79.502669
+    },
+    {
+      "iteration": 5,
+      "delta": 70.0309085404
+    },
+    {
+      "iteration": 6,
+      "delta": 61.7628709537
+    },
+    {
+      "iteration": 7,
+      "delta": 54.4671612598
+    },
+    {
+      "iteration": 8,
+      "delta": 48.0296268049
+    },
+    {
+      "iteration": 9,
+      "delta": 42.3543991994
+    },
+    {
+      "iteration": 10,
+      "delta": 37.3507878288
+    },
+    {
+      "iteration": 11,
+      "delta": 32.9389414916
+    },
+    {
+      "iteration": 12,
+      "delta": 29.0488458827
+    },
+    {
+      "iteration": 13,
+      "delta": 25.6187322728
+    },
+    {
+      "iteration": 14,
+      "delta": 22.5941136187
+    },
+    {
+      "iteration": 15,
+      "delta": 19.9269516357
+    },
+    {
+      "iteration": 16,
+      "delta": 17.6861802828
+    },
+    {
+      "iteration": 17,
+      "delta": 16.8009151764
+    },
+    {
+      "iteration": 18,
+      "delta": 15.959550754
+    },
+    {
+      "iteration": 19,
+      "delta": 15.1528930708
+    },
+    {
+      "iteration": 20,
+      "delta": 14.3131027179
+    },
+    {
+      "iteration": 21,
+      "delta": 13.4591376966
+    },
+    {
+      "iteration": 22,
+      "delta": 7.4326790177
+    },
+    {
+      "iteration": 23,
+      "delta": 7.058598123
+    },
+    {
+      "iteration": 24,
+      "delta": 2.4263153164
+    },
+    {
+      "iteration": 25,
+      "delta": 2.3037740464
+    },
+    {
+      "iteration": 26,
+      "delta": 0.5514771568
+    },
+    {
+      "iteration": 27,
+      "delta": 0.5234946495
+    },
+    {
+      "iteration": 28,
+      "delta": 0.0925205826
+    },
+    {
+      "iteration": 29,
+      "delta": 0.0877981159
+    },
+    {
+      "iteration": 30,
+      "delta": 0.0118496206
+    },
+    {
+      "iteration": 31,
+      "delta": 0.0112403988
+    },
+    {
+      "iteration": 32,
+      "delta": 0.0011816379
+    },
+    {
+      "iteration": 33,
+      "delta": 0.0011203652
+    },
+    {
+      "iteration": 34,
+      "delta": 9.27041e-05
+    }
+  ],
+  "states": 6111
+}

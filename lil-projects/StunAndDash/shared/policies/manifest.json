@@ -1,0 +1,17 @@
+{
+  "level": "level01",
+  "level_name": "Pasarela",
+  "state_schema": "x,y,stun,time_bucket,danger",
+  "actions": [
+    "left",
+    "right",
+    "jump",
+    "wait",
+    "jump_left",
+    "jump_right"
+  ],
+  "policies": {
+    "bellman": "policies/bellman.json",
+    "qlearning": "policies/qlearning.json"
+  }
+}
